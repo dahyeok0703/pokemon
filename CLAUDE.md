@@ -132,7 +132,7 @@
 ## 9. 빌드 진행 현황 (체크리스트 — 작업하며 갱신)
 
 - [x] Phase 1: 스캐폴드 + lore.md + 전체 스키마 + CLAUDE.md + README.md
-- [ ] Phase 2: 포켓몬 DB(대표 세트→확장) + regions.md 현실 지리 매핑
+- [x] Phase 2: 포켓몬 DB(전 1025종 + 190 대체폼 + 919 기술 + index) + regions.md 현실 지리 매핑
 - [ ] Phase 3: 전투/포획/육성/메가/거다이맥스 규칙 + 시드 재현성 검증
 - [ ] Phase 4: 대회 템플릿 → 약 500개 생성 + 연간 달력
 - [ ] Phase 5: NPC + 시작 시나리오 + 세이브 시스템 완성
@@ -149,7 +149,7 @@
 | `CLAUDE.md` | (이 파일) GM 운영 규칙. 최우선. |
 | `README.md` | 사람용 시작 안내. |
 | `data/lore.md` | 2026→2035 연표·세계관·입문 시나리오. |
-| `data/pokemon/` | 포켓몬 종 데이터 + `SCHEMA.md`. |
+| `data/pokemon/` | 종 데이터(`gen1~9.json`) + `forms.json`(메가/거맥/리전폼) + `moves.json`(기술 사전=전투 데이터) + `index.json`(경량 색인, 종 검색용) + `SCHEMA.md`. |
 | `data/regions.md` | 현실 지리 ↔ 포켓몬 출현 매핑. |
 | `data/tournaments/` | 약 500개 대회(티어별 분할) + `SCHEMA.md`. |
 | `data/calendar.md` | 연간 대회 달력. |

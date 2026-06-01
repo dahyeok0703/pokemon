@@ -1,0 +1,5 @@
+# PokéAPI 원본 CSV 캐시(대용량). tools/build_pokemon.py가 raw.githubusercontent에서 재다운로드.
+tools/cache/
+
+# 세이브 백업 (런타임 생성)
+saves/player.backup.json
