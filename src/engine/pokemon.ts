@@ -22,6 +22,11 @@ export interface Mon {
   status: string | null;
   types: string[];
   name: string;
+  // 일시 변신(전투 한정)
+  mega?: boolean;
+  gmax?: number; // 남은 턴
+  형태표시?: string; // "메가"/"거다이맥스"
+  _orig?: { stats: Record<Stat, number>; maxHP: number; types: string[] };
 }
 
 let UID = 1;

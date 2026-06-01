@@ -1,6 +1,6 @@
 import { RNG } from "./rng";
-import { MOVES, typeMult, speciesName } from "./data";
-import { Mon, expYield, gainExp, ExpEvents, newExpEvents } from "./pokemon";
+import { MOVES, typeMult, speciesName, megaForm, gmaxForm, STAT_KEYS } from "./data";
+import { Mon, expYield, gainExp, ExpEvents, newExpEvents, calcOne } from "./pokemon";
 import { catchAttempt, statusMod } from "./catch";
 
 export type LogLine = { text: string; cls?: string };
@@ -9,6 +9,8 @@ export type Action =
   | { type: "switch"; partyIndex: number }
   | { type: "item"; item: string }
   | { type: "catch"; ball: string; ballMod: number; ballName: string }
+  | { type: "mega" }
+  | { type: "gmax" }
   | { type: "run" };
 
 export type BattleState = "ongoing" | "win" | "lose" | "fled" | "caught";
@@ -26,6 +28,8 @@ export class Battle {
   caught: Mon | null = null;
   startCounter: number;
   events: ExpEvents = newExpEvents();
+  megaUsed = false;
+  gmaxUsed = false;
 
   constructor(rng: RNG, playerTeam: Mon[], enemyTeam: Mon[], kind: "wild" | "trainer", enemyLabel = "") {
     this.rng = rng;
@@ -45,6 +49,40 @@ export class Battle {
   private effSpeed(m: Mon): number {
     return m.status === "마비" ? Math.floor(m.stats.스피드 * 0.5) : m.stats.스피드;
   }
+
+  // ── 강화: 메가진화 / 거다이맥스 (배틀당 각 1회) ──
+  doMega(mon: Mon, log: (t: string, c?: string) => void): void {
+    const form = megaForm(mon.종_id); if (!form || this.megaUsed || mon.mega) return;
+    mon._orig = mon._orig ?? { stats: { ...mon.stats }, maxHP: mon.maxHP, types: [...mon.types] };
+    const ratio = mon.curHP / mon.maxHP;
+    for (const k of STAT_KEYS) mon.stats[k] = calcOne(form.종족값[k], mon.ivs[k], mon.evs[k], mon.level, k, mon.nature);
+    mon.maxHP = mon.stats.HP;
+    mon.curHP = Math.max(1, Math.min(mon.maxHP, Math.round(mon.maxHP * ratio)));
+    mon.types = (form.타입 ?? mon.types).slice();
+    mon.mega = true; mon.형태표시 = "메가"; this.megaUsed = true;
+    log(`✨✨ 메가진화! ${mon.별명}의 능력치가 크게 상승했다! [${mon.types.join("·")}]`, "crit");
+  }
+  doGmax(mon: Mon, log: (t: string, c?: string) => void): void {
+    const form = gmaxForm(mon.종_id); if (this.gmaxUsed || mon.gmax) return;
+    mon._orig = mon._orig ?? { stats: { ...mon.stats }, maxHP: mon.maxHP, types: [...mon.types] };
+    mon.maxHP = Math.floor(mon.maxHP * 1.8);
+    mon.curHP = Math.min(mon.maxHP, Math.floor(mon.curHP * 1.8));
+    if (form?.타입) mon.types = form.타입.slice();
+    mon.gmax = 3; mon.형태표시 = "거다이맥스"; this.gmaxUsed = true;
+    log(`✨✨ 거다이맥스! ${mon.별명}이(가) 거대화했다! HP가 치솟고 공격이 강화된다! (3턴)`, "crit");
+  }
+  private revertOne(mon: Mon, log?: (t: string, c?: string) => void): void {
+    if (!mon._orig) return;
+    mon.stats = { ...mon._orig.stats };
+    mon.maxHP = mon._orig.maxHP;
+    mon.curHP = Math.min(mon.curHP, mon.maxHP);
+    mon.types = mon._orig.types.slice();
+    mon._orig = undefined; mon.mega = false; mon.gmax = undefined;
+    const tag = mon.형태표시; mon.형태표시 = undefined;
+    if (log && tag) log(`${mon.별명}의 ${tag} 상태가 풀렸다.`, "dim");
+  }
+  // 전투 종료 시 모든 변신 원복
+  revertForms(): void { for (const m of this.playerTeam) this.revertOne(m); }
 
   // AI: pp 남은 위력기 중 기대데미지 최고
   aiPick(attacker: Mon, defender: Mon): number {
@@ -89,8 +127,9 @@ export class Battle {
     const crit = this.rng.rand() < 1 / 24 ? 1.5 : 1.0;
     const stab = attacker.types.includes(mv.타입) ? 1.5 : 1.0;
     const burn = attacker.status === "화상" && isPhys ? 0.5 : 1.0;
+    const gmaxBoost = attacker.gmax && attacker.gmax > 0 ? 1.3 : 1.0;
     const base = Math.floor(Math.floor(Math.floor(((2 * attacker.level) / 5 + 2) * mv.위력 * A / D) / 50) + 2);
-    const dmg = Math.max(1, Math.floor(base * variation * stab * tm * crit * burn));
+    const dmg = Math.max(1, Math.floor(base * variation * stab * tm * crit * burn * gmaxBoost));
 
     const eff = tm > 1 ? " 효과가 굉장하다!" : tm < 1 ? " 효과가 별로다…" : "";
     const cs = crit > 1 ? " 급소!" : "";
@@ -131,6 +170,10 @@ export class Battle {
     const lines: LogLine[] = [];
     const log = (t: string, c?: string) => lines.push({ text: t, cls: c });
     if (this.state !== "ongoing" || this.awaitingSwitch) return lines;
+
+    // 강화 발동(턴을 소모하지 않음 — 변신 후 같은 턴에 행동)
+    if (action.type === "mega") { this.doMega(this.pActive(), log); return lines; }
+    if (action.type === "gmax") { this.doGmax(this.pActive(), log); return lines; }
 
     const enemyMoveIdx = this.aiPick(this.eActive(), this.pActive());
 
@@ -193,6 +236,9 @@ export class Battle {
     };
 
     if (playerFirst) { doPlayer(); doEnemy(); } else { doEnemy(); doPlayer(); }
+    // 거다이맥스 지속 턴 감소
+    const me = this.pActive();
+    if (me.gmax && me.gmax > 0) { me.gmax -= 1; if (me.gmax <= 0) this.revertOne(me, log); }
     return lines;
   }
 }

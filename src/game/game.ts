@@ -1,9 +1,9 @@
 import { RNG } from "../engine/rng";
-import { SPECIES, MOVES, RARITY_WEIGHT, TOURNAMENTS, speciesName, Species } from "../engine/data";
+import { SPECIES, MOVES, RARITY_WEIGHT, TOURNAMENTS, speciesName, Species, megaForm, gmaxForm } from "../engine/data";
 import { buildMon, Mon, fullHeal, applyLearn, appropriateStage } from "../engine/pokemon";
 import { Battle, Action } from "../engine/battle";
 import { BALLS } from "../engine/catch";
-import { eligible, licenseFor, genTrainerTeam, buildRounds, tierLevel, RoundDef, isOpen, regWindow, trophyName, entrantCount } from "../engine/tournament";
+import { eligible, licenseFor, genTrainerTeam, buildRounds, tierLevel, RoundDef, isOpen, regWindow, trophyName, entrantCount, closingSoon } from "../engine/tournament";
 import { WORLD, CONTINENTS, locsByContinent, LOC_BY_ID, rollEncounter, Method, Location } from "../engine/world";
 import { artwork, sprite } from "../engine/sprites";
 import { npcsPresent, npcChat, npcHint, NPC, NPC_TOTAL, pickFamous, displayName } from "../engine/npc";
@@ -14,6 +14,11 @@ import * as UI from "../ui/ui";
 const SHOP = [
   { item: "몬스터볼", 가격: 200 }, { item: "슈퍼볼", 가격: 600 }, { item: "하이퍼볼", 가격: 1200 },
   { item: "상처약", 가격: 300 }, { item: "고급상처약", 가격: 700 },
+];
+// 강화 장비 (고가, 1회 구매로 보유)
+const KEY_ITEMS = [
+  { item: "메가링", 가격: 50000, 설명: "메가진화 가능 포켓몬을 전투에서 메가진화시킨다" },
+  { item: "다이맥스밴드", 가격: 50000, 설명: "거다이맥스 가능 포켓몬을 전투에서 거다이맥스시킨다" },
 ];
 const GEN_RANGES: [number, number][] = [
   [1, 151], [152, 251], [252, 386], [387, 493], [494, 649], [650, 721], [722, 809], [810, 905], [906, 1025],
@@ -105,7 +110,21 @@ export class Game {
   // ───── 신규 게임: 이름 → 스타터 자유선택 → 배경 → 튜토리얼 ─────
   newGame(): void {
     UI.clearLog(); UI.print("새로운 여정이 시작된다.", "head"); UI.print("당신의 이름은?");
-    UI.inputPrompt("트레이너 이름 입력", (name) => { (this as any)._name = name; this.starterBrowse(); });
+    UI.inputPrompt("트레이너 이름 입력", (name) => { (this as any)._name = name; this.chooseNationality(); });
+  }
+  private bestOriginFor(국가: string): string {
+    const city = WORLD.find((l) => l.국가 === 국가 && l.도시);
+    if (city) return city.id;
+    const any = WORLD.find((l) => l.국가 === 국가);
+    return any ? any.id : "JP-TYO";
+  }
+  private chooseNationality(): void {
+    UI.clearLog();
+    UI.print(`${(this as any)._name}, 당신의 국적은?`, "head");
+    UI.print("국적에 따라 출신지가 정해집니다. (배경 이야기는 고른 포켓몬에 맞춰 자동 생성)", "dim");
+    const countries = [...new Set(WORLD.filter((l) => l.국가 !== "공해" && l.국가 !== "남극").map((l) => l.국가))];
+    UI.setActions(countries.map((c) => ({ label: c, on: () => { (this as any)._locId = this.bestOriginFor(c); this.starterBrowse(); } }))
+      .concat([{ label: "↩ 이름 다시", on: () => this.newGame() }]));
   }
   private starterBrowse(): void {
     UI.clearLog();
@@ -143,9 +162,8 @@ export class Game {
   private starterConfirm(id: number): void {
     const sp = SPECIES.get(id)!;
     this.rngOrTemp();
-    // 출신지: 스타터 타입에 맞는 거점 지역
-    const cities = WORLD.filter((l) => l.도시 && l.주요타입.some((t) => sp.타입.includes(t)));
-    const loc = (cities.length ? this.rng.pick(cities) : this.rng.pick(WORLD.filter((l) => l.도시)));
+    // 출신지: 플레이어가 고른 국적의 거점
+    const loc = LOC_BY_ID.get((this as any)._locId) ?? WORLD[0];
     const bgLines = backgroundFor(sp, loc, this.rng);
     UI.clearLog();
     UI.bigImage(artwork(id), `${sp.이름.한}  [${sp.타입.join("·")}]`);
@@ -188,6 +206,9 @@ export class Game {
     UI.print(loc.설명, "dim");
     const lead = this.p.party.find((m) => m.curHP > 0) ?? this.p.party[0];
     if (lead) UI.printHtml(`<img class="spr sm" src="${sprite(lead.종_id)}"> 선두 <b>${lead.별명}</b> Lv${lead.level} · ${UI.hpBarHtml(lead.curHP, lead.maxHP)}`);
+    // 접수 마감 임박 알림
+    const soon = TOURNAMENTS.filter((t) => (t.현실_개최지?.도시 === this.p.현재_도시 || t.현실_개최지?.국가 === this.p.현재_국가) && eligible(this.p, t).ok && closingSoon(t, this.p.날짜.월, this.p.날짜.일, this.p.시각));
+    soon.slice(0, 3).forEach((t) => UI.print(`⏰ 『${t.이름}』 접수 마감 임박! 지금 출전 가능.`, "warn"));
     const btns: UI.Btn[] = [
       { label: "🌿 탐험", primary: true, on: () => this.exploreMenu() },
       { label: "🧑 사람들", primary: true, on: () => this.npcMenu() },
@@ -298,9 +319,11 @@ export class Game {
     UI.setActions(btns);
   }
   private npcLevel(n: NPC): number {
-    const base = this.partyAvg() + (n.tier - 3) * 2 + this.rng.int(-1, 1);
+    const re = this.p.npc재대결[n.id] ?? 0;
+    const base = this.partyAvg() + (n.tier - 3) * 2 + this.rng.int(-1, 1) + Math.min(24, re * 2); // 재대결마다 강해짐
     return Math.max(3, Math.round(n.famous ? Math.max(base, this.partyAvg() + 6) : base));
   }
+  private friendTier(f: number): string { return f >= 60 ? "둘도 없는 친구" : f >= 30 ? "친한 사이" : f >= 12 ? "아는 사이" : f > 0 ? "안면" : "초면"; }
   // NPC 파티 구성: 유명 트레이너는 시그니처 에이스 + 정예 필러
   private npcTeam(n: NPC, lv: number, size: number): Mon[] {
     if (n.famous && n.에이스) {
@@ -314,11 +337,21 @@ export class Game {
   private npcInteract(n: NPC): void {
     UI.clearLog();
     if (n.famous) UI.bigImage(artwork(n.에이스!), `${displayName(n)} — 에이스 ${this.spName(n.에이스!)}`);
+    const f = this.p.npc친밀도[n.id] ?? 0; const re = this.p.npc재대결[n.id] ?? 0;
     UI.print(`${displayName(n)} — ${n.성격} 성격${n.famous ? " · ⭐ 세계적 명성" : ""}`, "head");
+    UI.print(`친밀도 ${f} (${this.friendTier(f)})${re ? ` · 대결 ${re}회` : ""}`, "dim");
     UI.printHtml(`<span class="npc">"${n.인사}"</span>`);
     UI.setActions([
-      { label: "💬 대화", primary: true, on: () => { this.p.npc전적.만남++; UI.printHtml(`<span class="npc">"${npcChat(this.rng)}"</span>`); if (this.rng.rand() < 0.12) { const it = this.rng.pick(["몬스터볼", "상처약", "슈퍼볼"]); this.p.인벤토리[it] = (this.p.인벤토리[it] ?? 0) + 1; UI.print(`${n.이름}이(가) ${it}을(를) 건넸다!`, "good"); } this.persist(); } },
-      { label: n.famous ? "⚔️ 명사에게 도전!" : "⚔️ 대결 신청", primary: true, on: () => this.npcBattle(n) },
+      { label: "💬 대화", primary: true, on: () => {
+        this.p.npc전적.만남++;
+        this.p.npc친밀도[n.id] = (this.p.npc친밀도[n.id] ?? 0) + this.rng.int(1, 3);
+        UI.printHtml(`<span class="npc">"${npcChat(this.rng)}"</span>`);
+        const fr = this.p.npc친밀도[n.id];
+        if (fr >= 30 && this.rng.rand() < 0.35) { const it = this.rng.pick(["하이퍼볼", "고급상처약", "메가링", "다이맥스밴드"]); if ((this.p.인벤토리[it] ?? 0) === 0 || !["메가링", "다이맥스밴드"].includes(it)) { this.p.인벤토리[it] = (this.p.인벤토리[it] ?? 0) + 1; UI.print(`친한 사이라며 ${n.이름}이(가) ${it}을(를) 선물했다!`, "good"); } }
+        else if (this.rng.rand() < 0.12) { const it = this.rng.pick(["몬스터볼", "상처약", "슈퍼볼"]); this.p.인벤토리[it] = (this.p.인벤토리[it] ?? 0) + 1; UI.print(`${n.이름}이(가) ${it}을(를) 건넸다!`, "good"); }
+        UI.print(`(친밀도 ${fr})`, "dim"); this.persist();
+      } },
+      { label: re ? `⚔️ 재대결 (${re}회·더 강해짐)` : (n.famous ? "⚔️ 명사에게 도전!" : "⚔️ 대결 신청"), primary: true, on: () => this.npcBattle(n) },
       { label: "🧭 정보 듣기", on: () => { UI.printHtml(`<span class="npc">"${npcHint(this.rng)}"</span>`); } },
       { label: "↩ 돌아가기", on: () => this.npcMenu() },
     ]);
@@ -326,17 +359,25 @@ export class Game {
   private spName(id: number): string { return SPECIES.get(id)?.이름.한 ?? `#${id}`; }
   private npcBattle(n: NPC): void {
     if (!this.p.party.some((m) => m.curHP > 0)) { UI.print("싸울 포켓몬이 없다.", "warn"); return; }
+    const re = this.p.npc재대결[n.id] ?? 0;
     const lv = this.npcLevel(n);
-    const size = n.famous ? Math.min(6, 4 + (this.rng.rand() < 0.5 ? 1 : 0)) : Math.min(4, 1 + Math.floor(n.tier / 2) + (this.rng.rand() < 0.4 ? 1 : 0));
+    const size = Math.min(6, (n.famous ? 4 : 1 + Math.floor(n.tier / 2)) + Math.min(2, Math.floor(re / 2)) + (this.rng.rand() < 0.4 ? 1 : 0));
     const enemy = this.npcTeam(n, lv, size);
-    UI.clearLog(); UI.print(`${displayName(n)}와(과)의 대결! (${size}마리)`, "sys");
+    UI.clearLog(); UI.print(`${displayName(n)}와(과)의 ${re ? `${re + 1}번째 대결` : "대결"}! (${size}마리, Lv${lv}급)`, "sys");
+    if (re > 0) UI.print("재대결을 거듭할수록 상대는 더 강해진다.", "dim");
     this.startBattle(enemy, "trainer", displayName(n), false, (b) => {
       UI.print("");
-      if (b.state === "win") { const g = lv * this.rng.int(50, 100) * (n.famous ? 3 : 1); this.addMoney(g, "배틀 상금"); const fame = (2 + n.tier) * (n.famous ? 4 : 1); this.p.명성 += fame; this.p.npc전적.승리++; UI.print(`명성 +${fame}`, "dim"); UI.printHtml(`<span class="npc">"${n.famous ? "훌륭하군. 자네 이름, 기억해두지." : "졌다… 강하네요!"}"</span>`); this.updateLicense(); }
-      else if (b.state === "lose") { this.p.npc전적.패배++; this.whiteOut(); return; }
+      this.p.npc재대결[n.id] = re + 1;
+      if (b.state === "win") {
+        const g = lv * this.rng.int(50, 100) * (n.famous ? 3 : 1) + re * 200; this.addMoney(g, "배틀 상금");
+        const fame = (2 + n.tier) * (n.famous ? 4 : 1) + re; this.p.명성 += fame; this.p.npc전적.승리++;
+        this.p.npc친밀도[n.id] = (this.p.npc친밀도[n.id] ?? 0) + 5;
+        UI.print(`명성 +${fame} · 친밀도 +5`, "dim");
+        UI.printHtml(`<span class="npc">"${n.famous ? "훌륭하군. 자네 이름, 기억해두지." : "졌다… 강하네요! 또 붙어요!"}"</span>`); this.updateLicense();
+      } else if (b.state === "lose") { this.p.npc전적.패배++; this.p.npc친밀도[n.id] = (this.p.npc친밀도[n.id] ?? 0) + 2; this.whiteOut(); return; }
       for (const m of this.p.party) fullHeal(m);
       this.persist();
-      UI.setActions([{ label: "다른 사람", primary: true, on: () => this.npcMenu() }, { label: "허브로", on: () => this.hub() }]);
+      UI.setActions([{ label: "다시 도전", on: () => this.npcBattle(n) }, { label: "다른 사람", primary: true, on: () => this.npcMenu() }, { label: "허브로", on: () => this.hub() }]);
     });
   }
 
@@ -356,14 +397,30 @@ export class Game {
     UI.head("세계로 이동 (이동 시 날짜가 흐른다)");
     UI.setActions(CONTINENTS.map((c) => ({ label: c, on: () => this.continentMenu(c) })).concat([{ label: "↩ 돌아가기", on: () => this.hub() }]));
   }
+  private travelCost(dest: Location): { cost: number; days: number } {
+    const cur = this.loc();
+    if (dest.대륙 === cur.대륙) return { cost: 3000 + ((this.hashStr(dest.id) % 6) * 1000), days: 1 };
+    return { cost: 18000 + ((this.hashStr(dest.id) % 23) * 1000), days: 2 + (this.hashStr(dest.id) % 2) };
+  }
+  private hashStr(s: string): number { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; }
   private continentMenu(c: string): void {
-    UI.head(`${c}`);
+    UI.head(`${c} — 이동 (항공료·시간 소요)`);
     const here = this.p.현재_장소;
-    const btns: UI.Btn[] = locsByContinent(c).map((l) => ({
-      label: `${l.도시 ? "🏙️ " : "⛰️ "}${l.이름}${l.id === here ? " (현재)" : ""}`,
-      disabled: l.id === here,
-      on: () => { this.p.현재_장소 = l.id; this.p.현재_도시 = l.이름; this.p.현재_국가 = l.국가; this.advanceDays(this.rng.int(1, 3)); UI.clearLog(); UI.print(`${l.이름}에 도착했다.`, "sys"); UI.print(l.설명, "dim"); this.persist(); this.hub(); },
-    }));
+    const btns: UI.Btn[] = locsByContinent(c).map((l) => {
+      const { cost, days } = this.travelCost(l);
+      const cur = l.id === here;
+      return {
+        label: cur ? `📍 ${l.이름} (현재)` : `${l.도시 ? "🏙️ " : "⛰️ "}${l.이름} — ₩${cost.toLocaleString()}/${days}일`,
+        disabled: cur,
+        on: () => {
+          if (this.p.소지금 < cost) { UI.print(`항공료가 부족하다. (₩${cost.toLocaleString()} 필요, 보유 ₩${this.p.소지금.toLocaleString()})`, "warn"); return; }
+          this.p.소지금 -= cost; this.advanceDays(days);
+          this.p.현재_장소 = l.id; this.p.현재_도시 = l.이름; this.p.현재_국가 = l.국가;
+          UI.clearLog(); UI.print(`✈️ ${l.이름}에 도착했다. (항공료 ₩${cost.toLocaleString()}, ${days}일 소요)`, "sys"); UI.print(l.설명, "dim");
+          this.persist(); this.hub();
+        },
+      };
+    });
     btns.push({ label: "↩ 대륙 목록", on: () => this.worldMap() });
     UI.setActions(btns);
   }
@@ -380,13 +437,18 @@ export class Game {
   }
   private renderBattle(): void {
     const b = this.battle!; this.persist();
-    if (b.state !== "ongoing") { this.battleOnEnd?.(b); return; }
+    if (b.state !== "ongoing") { b.revertForms(); this.battleOnEnd?.(b); return; }
     if (b.awaitingSwitch) { UI.print("다음 포켓몬을 내보내자.", "warn"); this.renderSwitch(true); return; }
     const me = b.pActive(), en = b.eActive();
-    UI.printHtml(`<div class="battlerow"><img src="${artwork(en.종_id)}"><div class="info"><b>${en.별명}</b> Lv${en.level} [${en.types.join("·")}]<br>${UI.hpBarHtml(en.curHP, en.maxHP)}</div></div>`);
-    UI.printHtml(`<div class="battlerow"><img src="${artwork(me.종_id)}"><div class="info"><b>${me.별명}</b> Lv${me.level} [${me.types.join("·")}]<br>${UI.hpBarHtml(me.curHP, me.maxHP)}</div></div>`);
+    const tag = (m: Mon) => (m.형태표시 ? `<span class="crit">${m.형태표시}</span> ` : "");
+    UI.printHtml(`<div class="battlerow"><img src="${artwork(en.종_id)}"><div class="info">${tag(en)}<b>${en.별명}</b> Lv${en.level} [${en.types.join("·")}]<br>${UI.hpBarHtml(en.curHP, en.maxHP)}</div></div>`);
+    UI.printHtml(`<div class="battlerow"><img src="${artwork(me.종_id)}"><div class="info">${tag(me)}<b>${me.별명}</b> Lv${me.level} [${me.types.join("·")}]<br>${UI.hpBarHtml(me.curHP, me.maxHP)}${me.gmax ? ` <span class="dim">(거다이맥스 ${me.gmax}턴)</span>` : ""}</div></div>`);
+    const canMega = !b.megaUsed && !me.mega && (this.p.인벤토리["메가링"] ?? 0) > 0 && !!megaForm(me.종_id);
+    const canGmax = !b.gmaxUsed && !me.gmax && (this.p.인벤토리["다이맥스밴드"] ?? 0) > 0 && !!gmaxForm(me.종_id);
     UI.setActions([
       { label: "⚔️ 싸우다", primary: true, on: () => this.renderMoves() },
+      ...(canMega ? [{ label: "✨ 메가진화", on: () => this.act({ type: "mega" }) }] : []),
+      ...(canGmax ? [{ label: "✨ 거다이맥스", on: () => this.act({ type: "gmax" }) }] : []),
       ...(this.battleAllowCatch ? [{ label: "🎯 잡기", on: () => this.renderBalls() }] : []),
       { label: "🎒 가방", on: () => this.renderItems() },
       { label: "🔄 포켓몬", on: () => this.renderSwitch(false) },
@@ -464,6 +526,11 @@ export class Game {
   private shop(): void {
     UI.head(`상점 (보유 ₩${this.p.소지금.toLocaleString()})`);
     const btns: UI.Btn[] = SHOP.map((s) => ({ label: `${s.item} — ₩${s.가격}`, disabled: this.p.소지금 < s.가격, on: () => { this.p.소지금 -= s.가격; this.p.인벤토리[s.item] = (this.p.인벤토리[s.item] ?? 0) + 1; this.persist(); UI.print(`${s.item} 구입 (보유 ${this.p.인벤토리[s.item]})`, "good"); this.shop(); } }));
+    UI.print("— 강화 장비 —", "dim");
+    for (const k of KEY_ITEMS) {
+      const owned = (this.p.인벤토리[k.item] ?? 0) > 0;
+      btns.push({ label: owned ? `${k.item} (보유중)` : `${k.item} — ₩${k.가격.toLocaleString()}`, disabled: owned || this.p.소지금 < k.가격, on: () => { this.p.소지금 -= k.가격; this.p.인벤토리[k.item] = 1; this.persist(); UI.print(`${k.item} 구입! ${k.설명}.`, "good"); this.shop(); } });
+    }
     btns.push({ label: "↩ 돌아가기", on: () => this.centerMenu() });
     UI.setActions(btns);
   }
@@ -486,7 +553,8 @@ export class Game {
     const btns: UI.Btn[] = list.map((t) => {
       const el = eligible(this.p, t); const lv = tierLevel(t.티어, t.특수룰, this.partyAvg());
       const open = isOpen(t, this.p.날짜.월, this.p.날짜.일, this.p.시각);
-      const tag = !el.ok ? "🔒자격" : open ? "🟢접수중" : "🔴마감";
+      const soon = open && closingSoon(t, this.p.날짜.월, this.p.날짜.일, this.p.시각);
+      const tag = !el.ok ? "🔒자격" : soon ? "⏰마감임박" : open ? "🟢접수중" : "🔴마감";
       const star = t.id === GRAND_TOURNAMENT ? "🌟[세계최강] " : "";
       return { label: `${star}${t.이름} [${t.티어}] Lv≤${lv} ${tag}`, on: () => {
         if (!el.ok) { UI.print(`출전 불가: ${el.reasons.join(", ")}`, "warn"); return; }

@@ -89,6 +89,14 @@ export function isOpen(t: any, 월: number, 일: number, 시각: number): boolea
   return 일 >= w.dayLo && 일 <= w.dayHi;
 }
 
+// 접수 마감 임박? (열려 있고, 마지막 날 또는 마지막 2시간)
+export function closingSoon(t: any, 월: number, 일: number, 시각: number): boolean {
+  if (!isOpen(t, 월, 일, 시각)) return false;
+  const w = regWindow(t);
+  if (w.dayLo < 0) return 시각 >= w.hourHi - 2; // 로컬(주말)
+  return 일 === w.dayHi || 시각 >= w.hourHi - 2;
+}
+
 // 대회 트로피 이름
 export function trophyName(t: any): string {
   const medal: Record<string, string> = { 로컬: "🥉", 지방: "🥈", 국가: "🥇", 대륙: "🏆", 세계: "👑", 특수: "🎖️" };

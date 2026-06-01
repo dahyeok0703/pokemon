@@ -73,6 +73,14 @@ export function speciesName(id: number): string {
   return SPECIES.get(id)?.이름.한 ?? `#${id}`;
 }
 
+// 메가/거다이맥스 폼 조회 (forms.json)
+export function megaForm(id: number): any | null {
+  return (FORMS_BY_BASE.get(id) ?? []).find((f) => f.form === "메가") ?? null;
+}
+export function gmaxForm(id: number): any | null {
+  return (FORMS_BY_BASE.get(id) ?? []).find((f) => f.form === "거다이맥스") ?? null;
+}
+
 // ---- 타입 상성 -------------------------------------------------------------
 export function typeMult(atkType: string, defTypes: string[]): number {
   let m = 1;
