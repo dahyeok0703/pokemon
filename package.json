@@ -1,0 +1,16 @@
+{
+  "name": "pokemon-earth-2035",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "현실 지구 2035 — 포켓몬 텍스트 RPG (브라우저 자체 실행 버전)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11"
+  }
+}

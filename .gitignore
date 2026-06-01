@@ -3,3 +3,8 @@ tools/cache/
 
 # 세이브 백업 (런타임 생성)
 saves/player.backup.json
+
+# 웹앱(노드/빌드 산출물)
+node_modules/
+dist/
+*.tsbuildinfo
