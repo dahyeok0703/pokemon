@@ -62,3 +62,36 @@ export function hpBarHtml(cur: number, max: number): string {
   const cls = pct <= 20 ? "low" : pct <= 50 ? "mid" : "";
   return `<span class="hpbar ${cls}"><i style="width:${pct}%"></i></span> ${cur}/${max}`;
 }
+
+export interface Tile { img: string; title: string; sub?: string; dim?: boolean; mark?: string; on?: () => void; }
+export function renderGrid(tiles: Tile[]): void {
+  const grid = document.createElement("div");
+  grid.className = "grid";
+  for (const t of tiles) {
+    const cell = document.createElement("div");
+    cell.className = "tile" + (t.dim ? " dim" : "") + (t.on ? " click" : "");
+    const im = document.createElement("img");
+    im.loading = "lazy";
+    im.src = t.img;
+    im.alt = t.title;
+    cell.appendChild(im);
+    const tt = document.createElement("div"); tt.className = "tname"; tt.textContent = t.title; cell.appendChild(tt);
+    if (t.sub) { const ts = document.createElement("div"); ts.className = "tsub"; ts.textContent = t.sub; cell.appendChild(ts); }
+    if (t.mark) { const tm = document.createElement("span"); tm.className = "tmark"; tm.textContent = t.mark; cell.appendChild(tm); }
+    if (t.on) cell.onclick = t.on;
+    grid.appendChild(cell);
+  }
+  logEl().appendChild(grid);
+  logEl().scrollTop = logEl().scrollHeight;
+}
+
+// 큰 단일 이미지 + 캡션
+export function bigImage(src: string, caption = ""): void {
+  const wrap = document.createElement("div");
+  wrap.className = "bigimg";
+  const im = document.createElement("img"); im.src = src; im.alt = caption;
+  wrap.appendChild(im);
+  if (caption) { const c = document.createElement("div"); c.className = "cap"; c.textContent = caption; wrap.appendChild(c); }
+  logEl().appendChild(wrap);
+  logEl().scrollTop = logEl().scrollHeight;
+}

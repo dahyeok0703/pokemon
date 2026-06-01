@@ -87,3 +87,42 @@ button.act:disabled { opacity: .4; cursor: not-allowed; }
 .hpbar > i { display:block; height:100%; background: var(--good); }
 .hpbar.mid > i { background: var(--warn); }
 .hpbar.low > i { background: var(--accent); }
+
+/* 인라인 스프라이트 */
+.spr { vertical-align: middle; image-rendering: auto; }
+.spr.sm { width: 40px; height: 40px; }
+.spr.md { width: 72px; height: 72px; }
+
+/* 이미지 그리드 (스타터 선택 / 도감) */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+.tile {
+  position: relative;
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px 4px 8px;
+  text-align: center;
+}
+.tile img { width: 64px; height: 64px; object-fit: contain; display: block; margin: 0 auto; }
+.tile .tname { font-size: 12px; margin-top: 2px; color: var(--ink); }
+.tile .tsub { font-size: 10px; color: var(--dim); }
+.tile .tmark { position: absolute; top: 4px; right: 6px; font-size: 12px; }
+.tile.dim { opacity: 0.28; filter: grayscale(0.7); }
+.tile.click { cursor: pointer; transition: border-color .12s, transform .08s; }
+.tile.click:hover { border-color: var(--accent2); transform: translateY(-2px); }
+.tile.dim.click:hover { opacity: 0.55; }
+
+/* 큰 이미지(상세/배틀) */
+.bigimg { text-align: center; margin: 8px 0; }
+.bigimg img { width: 180px; height: 180px; object-fit: contain; }
+.bigimg .cap { color: var(--dim); font-size: 13px; }
+
+/* 배틀 양측 카드 */
+.battlerow { display: flex; align-items: center; gap: 10px; margin: 4px 0; }
+.battlerow img { width: 84px; height: 84px; object-fit: contain; }
+.battlerow .info { flex: 1; }
