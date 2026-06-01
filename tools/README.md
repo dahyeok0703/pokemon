@@ -27,8 +27,21 @@ PokéAPI의 공개 CSV 데이터셋에서 전 종 포켓몬 DB를 생성한다.
 - **휴리스틱**: `현실_출현지역`/`서식_환경`은 타입 기반 표(`TYPE_REGION`)로 시드(자세히는 `data/regions.md`).
 - 한국어=`language_id 3`. 한글명 없는 신종은 영문명 폴백.
 
+## build_mechanics.py  ✅ (Phase 3)
+
+전투 엔진용 수치 데이터를 PokéAPI CSV에서 생성한다. `python3 tools/build_mechanics.py`
+
+- `data/type_chart.json` — 18×18 타입 상성표(0/0.5/1/2).
+- `data/natures.json` — 25 성격 `{상승, 하강}` 보정.
+- `data/exp_tables.json` — 경험치 그룹 6종의 Lv1~100 누적 경험치(공식 산출).
+
+## verify_battle.py  ✅ (Phase 3)
+
+`mechanics/*.md` 공식 + CLAUDE.md PRNG(Mulberry32)를 구현해 **결정론·재현성**을 검증한다.
+`python3 tools/verify_battle.py` — PRNG 재현, 능력치(리자몽 본가값 일치), 데미지 재현, 타입 상성, 포획 재현 전부 통과.
+GM은 이 파일과 동일한 공식으로 전투를 계산한다.
+
 ## 예정
 
 - `gen_tournaments.py` (Phase 4) — 티어별 템플릿으로 약 500개 대회 생성.
 - `build_calendar.py` (Phase 4) — 개최 주기 규칙 → 연도 달력 전개.
-- `verify_battle.py` (Phase 3) — 데미지/포획/능력치 공식의 시드 PRNG 재현성 검증.
