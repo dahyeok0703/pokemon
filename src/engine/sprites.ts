@@ -13,3 +13,6 @@ export function sprite(id: number): string {
 export function icon(id: number): string {
   return sprite(id);
 }
+// 색이 다른 포켓몬(이로치)
+export function shinyArtwork(id: number): string { return `${ROOT}/other/official-artwork/shiny/${id}.png`; }
+export function shinySprite(id: number): string { return `${ROOT}/shiny/${id}.png`; }

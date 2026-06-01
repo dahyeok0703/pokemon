@@ -1,5 +1,5 @@
 import { RNG } from "./rng";
-import { MOVES, typeMult, speciesName, megaForm, gmaxForm, STAT_KEYS } from "./data";
+import { MOVES, typeMult, speciesName, megaForms, gmaxForm, STAT_KEYS } from "./data";
 import { Mon, expYield, gainExp, ExpEvents, newExpEvents, calcOne } from "./pokemon";
 import { catchAttempt, statusMod } from "./catch";
 
@@ -9,11 +9,14 @@ export type Action =
   | { type: "switch"; partyIndex: number }
   | { type: "item"; item: string }
   | { type: "catch"; ball: string; ballMod: number; ballName: string }
-  | { type: "mega" }
+  | { type: "mega"; variant: number }
   | { type: "gmax" }
   | { type: "run" };
 
 export type BattleState = "ongoing" | "win" | "lose" | "fled" | "caught";
+
+// 기술 타입 → 추가효과로 유발하는 상태이상
+const STATUS_BY_TYPE: Record<string, string> = { 불꽃: "화상", 전기: "마비", 얼음: "얼음", 독: "독", 풀: "독" };
 
 export class Battle {
   rng: RNG;
@@ -50,20 +53,23 @@ export class Battle {
     return m.status === "마비" ? Math.floor(m.stats.스피드 * 0.5) : m.stats.스피드;
   }
 
-  // ── 강화: 메가진화 / 거다이맥스 (배틀당 각 1회) ──
-  doMega(mon: Mon, log: (t: string, c?: string) => void): void {
-    const form = megaForm(mon.종_id); if (!form || this.megaUsed || mon.mega) return;
+  // ── 강화: 메가진화 / 거다이맥스 (배틀당 각 1회, 한 개체는 둘 중 하나만) ──
+  doMega(mon: Mon, formIndex: number, log: (t: string, c?: string) => void): void {
+    const forms = megaForms(mon.종_id);
+    const form = forms[formIndex] ?? forms[0];
+    if (!form || this.megaUsed || mon.mega || mon.gmax) return;
     mon._orig = mon._orig ?? { stats: { ...mon.stats }, maxHP: mon.maxHP, types: [...mon.types] };
     const ratio = mon.curHP / mon.maxHP;
     for (const k of STAT_KEYS) mon.stats[k] = calcOne(form.종족값[k], mon.ivs[k], mon.evs[k], mon.level, k, mon.nature);
     mon.maxHP = mon.stats.HP;
     mon.curHP = Math.max(1, Math.min(mon.maxHP, Math.round(mon.maxHP * ratio)));
     mon.types = (form.타입 ?? mon.types).slice();
-    mon.mega = true; mon.형태표시 = "메가"; this.megaUsed = true;
-    log(`✨✨ 메가진화! ${mon.별명}의 능력치가 크게 상승했다! [${mon.types.join("·")}]`, "crit");
+    const xy = form.식별자?.endsWith("-x") ? " X" : form.식별자?.endsWith("-y") ? " Y" : "";
+    mon.mega = true; mon.형태표시 = `메가${xy}`; this.megaUsed = true;
+    log(`✨✨ 메가진화${xy}! ${mon.별명}의 능력치가 크게 상승했다! [${mon.types.join("·")}]`, "crit");
   }
   doGmax(mon: Mon, log: (t: string, c?: string) => void): void {
-    const form = gmaxForm(mon.종_id); if (this.gmaxUsed || mon.gmax) return;
+    const form = gmaxForm(mon.종_id); if (this.gmaxUsed || mon.gmax || mon.mega) return;
     mon._orig = mon._orig ?? { stats: { ...mon.stats }, maxHP: mon.maxHP, types: [...mon.types] };
     mon.maxHP = Math.floor(mon.maxHP * 1.8);
     mon.curHP = Math.min(mon.maxHP, Math.floor(mon.curHP * 1.8));
@@ -84,6 +90,36 @@ export class Battle {
   // 전투 종료 시 모든 변신 원복
   revertForms(): void { for (const m of this.playerTeam) this.revertOne(m); }
 
+  // 상태이상으로 행동 가능한가 (잠듦/얼음/마비)
+  private canActStatus(mon: Mon, log: (t: string, c?: string) => void): boolean {
+    if (mon.status === "잠듦") {
+      if (this.rng.rand() < 0.34) { mon.status = null; log(`${mon.별명}은(는) 잠에서 깼다!`, "dim"); }
+      else { log(`${mon.별명}은(는) 새근새근 자고 있다…`, "dim"); return false; }
+    }
+    if (mon.status === "얼음") {
+      if (this.rng.rand() < 0.2) { mon.status = null; log(`${mon.별명}의 얼음이 녹았다!`, "dim"); }
+      else { log(`${mon.별명}은(는) 얼어붙어 움직일 수 없다!`, "dim"); return false; }
+    }
+    if (mon.status === "마비" && this.rng.rand() < 0.25) { log(`${mon.별명}은(는) 몸이 저려 움직일 수 없다!`, "warn"); return false; }
+    return true;
+  }
+  // 턴 종료 상태이상 데미지. 기절하면 true.
+  private residualTick(mon: Mon, log: (t: string, c?: string) => void): boolean {
+    if (mon.curHP <= 0 || !mon.status) return false;
+    let d = 0;
+    if (mon.status === "독" || mon.status === "맹독") d = Math.floor(mon.maxHP / 8);
+    else if (mon.status === "화상") d = Math.floor(mon.maxHP / 16);
+    if (d > 0) { d = Math.max(1, d); mon.curHP = Math.max(0, mon.curHP - d); log(`${mon.별명}이(가) ${mon.status} 피해 ${d}. (HP ${mon.curHP}/${mon.maxHP})`, "dim"); }
+    return mon.curHP <= 0;
+  }
+  // 매 턴 종료 처리: 거다이맥스 카운트 + 상태이상 데미지
+  private endOfTurn(log: (t: string, c?: string) => void): void {
+    const me = this.pActive();
+    if (me.gmax && me.gmax > 0) { me.gmax -= 1; if (me.gmax <= 0) this.revertOne(me, log); }
+    if (this.state === "ongoing" && this.eActive().curHP > 0 && this.residualTick(this.eActive(), log)) this.onEnemyFaint(log);
+    if (this.state === "ongoing" && !this.awaitingSwitch && this.pActive().curHP > 0 && this.residualTick(this.pActive(), log)) this.onPlayerFaint(log);
+  }
+
   // AI: pp 남은 위력기 중 기대데미지 최고
   aiPick(attacker: Mon, defender: Mon): number {
     let best = -1, bi = 0;
@@ -102,6 +138,7 @@ export class Battle {
   }
 
   private executeAttack(attacker: Mon, defender: Mon, slotIndex: number, log: (t: string, c?: string) => void): void {
+    if (!this.canActStatus(attacker, log)) return; // 상태이상으로 행동 불가
     const slot = attacker.moves[slotIndex];
     const mv = MOVES[slot.name];
     if (!slot || !mv) { log(`${attacker.별명}은(는) 쓸 수 있는 기술이 없다…`, "dim"); return; }
@@ -137,6 +174,12 @@ export class Battle {
     log(`  변동${variation.toFixed(2)}·자속${stab}·상성${tm}${cs}${eff} → ${dmg} 데미지`, crit > 1 ? "crit" : undefined);
     defender.curHP = Math.max(0, defender.curHP - dmg);
     log(`  ${defender.별명} HP ${defender.curHP + dmg} → ${defender.curHP} / ${defender.maxHP}`);
+    // 추가효과 상태이상
+    const sec = STATUS_BY_TYPE[mv.타입];
+    if (sec && defender.curHP > 0 && !defender.status && mv.추가효과확률 && this.rng.int(0, 99) < mv.추가효과확률) {
+      defender.status = sec;
+      log(`  ${defender.별명}이(가) ${sec} 상태가 되었다!`, "warn");
+    }
   }
 
   // 적이 기절했을 때 진행
@@ -172,7 +215,7 @@ export class Battle {
     if (this.state !== "ongoing" || this.awaitingSwitch) return lines;
 
     // 강화 발동(턴을 소모하지 않음 — 변신 후 같은 턴에 행동)
-    if (action.type === "mega") { this.doMega(this.pActive(), log); return lines; }
+    if (action.type === "mega") { this.doMega(this.pActive(), action.variant ?? 0, log); return lines; }
     if (action.type === "gmax") { this.doGmax(this.pActive(), log); return lines; }
 
     const enemyMoveIdx = this.aiPick(this.eActive(), this.pActive());
@@ -184,6 +227,7 @@ export class Battle {
       log("달아나지 못했다!", "dim");
       this.executeAttack(this.eActive(), this.pActive(), enemyMoveIdx, log);
       if (this.pActive().curHP <= 0) this.onPlayerFaint(log);
+      this.endOfTurn(log);
       return lines;
     }
     if (action.type === "catch") {
@@ -194,6 +238,7 @@ export class Battle {
       log(`아쉽다! ${this.eActive().별명}이(가) 볼에서 튀어나왔다. (${res.shakes}회 흔들림)`, "dim");
       this.executeAttack(this.eActive(), this.pActive(), enemyMoveIdx, log);
       if (this.pActive().curHP <= 0) this.onPlayerFaint(log);
+      this.endOfTurn(log);
       return lines;
     }
     if (action.type === "item") {
@@ -202,6 +247,7 @@ export class Battle {
       else if (action.item === "고급상처약") { const h = Math.min(60, m.maxHP - m.curHP); m.curHP += h; log(`${m.별명}의 HP를 ${h} 회복했다.`, "good"); }
       this.executeAttack(this.eActive(), this.pActive(), enemyMoveIdx, log);
       if (this.pActive().curHP <= 0) this.onPlayerFaint(log);
+      this.endOfTurn(log);
       return lines;
     }
     if (action.type === "switch") {
@@ -209,6 +255,7 @@ export class Battle {
       log(`가라, ${this.pActive().별명}!`, "good");
       this.executeAttack(this.eActive(), this.pActive(), enemyMoveIdx, log);
       if (this.pActive().curHP <= 0) this.onPlayerFaint(log);
+      this.endOfTurn(log);
       return lines;
     }
 
@@ -236,9 +283,7 @@ export class Battle {
     };
 
     if (playerFirst) { doPlayer(); doEnemy(); } else { doEnemy(); doPlayer(); }
-    // 거다이맥스 지속 턴 감소
-    const me = this.pActive();
-    if (me.gmax && me.gmax > 0) { me.gmax -= 1; if (me.gmax <= 0) this.revertOne(me, log); }
+    this.endOfTurn(log);
     return lines;
   }
 }

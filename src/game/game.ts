@@ -1,11 +1,11 @@
 import { RNG } from "../engine/rng";
-import { SPECIES, MOVES, RARITY_WEIGHT, TOURNAMENTS, speciesName, Species, megaForm, gmaxForm } from "../engine/data";
+import { SPECIES, MOVES, RARITY_WEIGHT, TOURNAMENTS, speciesName, Species, megaForm, megaForms, gmaxForm } from "../engine/data";
 import { buildMon, Mon, fullHeal, applyLearn, appropriateStage } from "../engine/pokemon";
 import { Battle, Action } from "../engine/battle";
 import { BALLS } from "../engine/catch";
 import { eligible, licenseFor, genTrainerTeam, buildRounds, tierLevel, RoundDef, isOpen, regWindow, trophyName, entrantCount, closingSoon } from "../engine/tournament";
 import { WORLD, CONTINENTS, locsByContinent, LOC_BY_ID, rollEncounter, Method, Location } from "../engine/world";
-import { artwork, sprite } from "../engine/sprites";
+import { artwork, sprite, shinyArtwork, shinySprite } from "../engine/sprites";
 import { npcsPresent, npcChat, npcHint, NPC, NPC_TOTAL, pickFamous, displayName } from "../engine/npc";
 import { generateReactions } from "../engine/reactions";
 import { Player, newPlayer, save, load, hasSave, wipe, seen, caught } from "./save";
@@ -205,7 +205,7 @@ export class Game {
     UI.head(`${loc.이름} — ${this.p.날짜.월}월 ${this.p.날짜.일}일 ${this.p.시각}시 (${part})`);
     UI.print(loc.설명, "dim");
     const lead = this.p.party.find((m) => m.curHP > 0) ?? this.p.party[0];
-    if (lead) UI.printHtml(`<img class="spr sm" src="${sprite(lead.종_id)}"> 선두 <b>${lead.별명}</b> Lv${lead.level} · ${UI.hpBarHtml(lead.curHP, lead.maxHP)}`);
+    if (lead) UI.printHtml(`<img class="spr sm" src="${this.spr(lead)}"> 선두 ${lead.shiny ? "✨" : ""}<b>${lead.별명}</b> Lv${lead.level} · ${UI.hpBarHtml(lead.curHP, lead.maxHP)}`);
     // 접수 마감 임박 알림
     const soon = TOURNAMENTS.filter((t) => (t.현실_개최지?.도시 === this.p.현재_도시 || t.현실_개최지?.국가 === this.p.현재_국가) && eligible(this.p, t).ok && closingSoon(t, this.p.날짜.월, this.p.날짜.일, this.p.시각));
     soon.slice(0, 3).forEach((t) => UI.print(`⏰ 『${t.이름}』 접수 마감 임박! 지금 출전 가능.`, "warn"));
@@ -258,7 +258,7 @@ export class Game {
         UI.print("");
         if (b.state === "win") { const g = lv * this.rng.int(40, 90); this.addMoney(g, "배틀 상금"); this.p.명성 += 3; UI.print("명성 +3", "dim"); }
         else if (b.state === "lose") { this.whiteOut(); return; }
-        for (const m of this.p.party) if (m.curHP > 0) {/* keep */}
+        for (const m of this.p.party) fullHeal(m);
         this.persist();
         UI.setActions([{ label: "계속 탐험", primary: true, on: () => this.exploreMenu() }, { label: "허브로", on: () => this.hub() }]);
       });
@@ -272,11 +272,13 @@ export class Game {
     const loc = this.loc();
     this.advanceHours(method === "잠복" ? 4 : 1);
     const enc = rollEncounter(this.rng, loc, method, this.p.밤);
-    const wild = buildMon(this.rng, enc.species.id, enc.level);
+    const shiny = this.rng.rand() < 1 / 512;
+    const wild = buildMon(this.rng, enc.species.id, enc.level, { shiny });
     seen(this.p, enc.species.id);
     UI.clearLog();
     UI.print(`[${loc.이름} · ${method}${this.p.밤 ? " · 밤" : ""}]`, "dim");
-    UI.bigImage(artwork(enc.species.id), `${enc.legend ? "✨전설✨ " : ""}야생 ${wild.별명} Lv${wild.level}  [${enc.species.타입.join("·")}, ${enc.species.희귀도}]`);
+    UI.bigImage(shiny ? shinyArtwork(enc.species.id) : artwork(enc.species.id), `${shiny ? "✨이로치✨ " : ""}${enc.legend ? "✨전설✨ " : ""}야생 ${wild.별명} Lv${wild.level}  [${enc.species.타입.join("·")}, ${enc.species.희귀도}]`);
+    if (shiny) UI.print("✨ 색이 다른 포켓몬(이로치)이다! 극히 드문 개체!", "crit");
     if (enc.legend) UI.print("전설의 포켓몬이 모습을 드러냈다! 놓치지 마라!", "crit");
     this.startBattle([wild], "wild", `야생 ${wild.별명}`, true, (b) => this.resolveWild(b, () => UI.setActions([
       { label: `계속 ${method}`, primary: true, on: () => this.explore(method) },
@@ -291,9 +293,11 @@ export class Game {
       if (this.p.party.length < 6) { this.p.party.push(c); UI.print(`${c.별명}이(가) 파티에 합류했다!`, "good"); }
       else { this.p.box.push(c); UI.print(`${c.별명}은(는) 박스로 보내졌다.`, "good"); }
       this.addMoney(c.level * this.rng.int(15, 30), "포획 보고 보상");
+      if (c.shiny) this.addMoney(5000, "✨이로치 포획 보너스");
     } else if (b.state === "win") {
       UI.print("야생 포켓몬을 쓰러뜨렸다.", "good");
       this.addMoney(b.enemyTeam[0].level * this.rng.int(20, 45), "야생 처치 보상");
+      if (b.enemyTeam[0].shiny) this.addMoney(2000, "✨이로치 처치 보너스");
     } else if (b.state === "fled") UI.print("전투에서 벗어났다.", "dim");
     else if (b.state === "lose") { this.whiteOut(); return; }
     this.persist(); after();
@@ -357,6 +361,7 @@ export class Game {
     ]);
   }
   private spName(id: number): string { return SPECIES.get(id)?.이름.한 ?? `#${id}`; }
+  private spr(m: Mon): string { return m.shiny ? shinySprite(m.종_id) : sprite(m.종_id); }
   private npcBattle(n: NPC): void {
     if (!this.p.party.some((m) => m.curHP > 0)) { UI.print("싸울 포켓몬이 없다.", "warn"); return; }
     const re = this.p.npc재대결[n.id] ?? 0;
@@ -440,20 +445,35 @@ export class Game {
     if (b.state !== "ongoing") { b.revertForms(); this.battleOnEnd?.(b); return; }
     if (b.awaitingSwitch) { UI.print("다음 포켓몬을 내보내자.", "warn"); this.renderSwitch(true); return; }
     const me = b.pActive(), en = b.eActive();
-    const tag = (m: Mon) => (m.형태표시 ? `<span class="crit">${m.형태표시}</span> ` : "");
-    UI.printHtml(`<div class="battlerow"><img src="${artwork(en.종_id)}"><div class="info">${tag(en)}<b>${en.별명}</b> Lv${en.level} [${en.types.join("·")}]<br>${UI.hpBarHtml(en.curHP, en.maxHP)}</div></div>`);
-    UI.printHtml(`<div class="battlerow"><img src="${artwork(me.종_id)}"><div class="info">${tag(me)}<b>${me.별명}</b> Lv${me.level} [${me.types.join("·")}]<br>${UI.hpBarHtml(me.curHP, me.maxHP)}${me.gmax ? ` <span class="dim">(거다이맥스 ${me.gmax}턴)</span>` : ""}</div></div>`);
-    const canMega = !b.megaUsed && !me.mega && (this.p.인벤토리["메가링"] ?? 0) > 0 && !!megaForm(me.종_id);
-    const canGmax = !b.gmaxUsed && !me.gmax && (this.p.인벤토리["다이맥스밴드"] ?? 0) > 0 && !!gmaxForm(me.종_id);
+    const tag = (m: Mon) => (m.형태표시 ? `<span class="crit">${m.형태표시}</span> ` : "") + (m.shiny ? `<span class="crit">✨</span> ` : "");
+    const st = (m: Mon) => (m.status ? ` <span class="warn">[${m.status}]</span>` : "");
+    const img = (m: Mon) => (m.shiny ? shinyArtwork(m.종_id) : artwork(m.종_id));
+    UI.printHtml(`<div class="battlerow"><img src="${img(en)}"><div class="info">${tag(en)}<b>${en.별명}</b> Lv${en.level} [${en.types.join("·")}]${st(en)}<br>${UI.hpBarHtml(en.curHP, en.maxHP)}</div></div>`);
+    UI.printHtml(`<div class="battlerow"><img src="${img(me)}"><div class="info">${tag(me)}<b>${me.별명}</b> Lv${me.level} [${me.types.join("·")}]${st(me)}<br>${UI.hpBarHtml(me.curHP, me.maxHP)}${me.gmax ? ` <span class="dim">(거다이맥스 ${me.gmax}턴)</span>` : ""}</div></div>`);
+    const canMega = !b.megaUsed && !me.mega && !me.gmax && (this.p.인벤토리["메가링"] ?? 0) > 0 && !!megaForm(me.종_id);
+    const canGmax = !b.gmaxUsed && !me.gmax && !me.mega && (this.p.인벤토리["다이맥스밴드"] ?? 0) > 0 && !!gmaxForm(me.종_id);
     UI.setActions([
       { label: "⚔️ 싸우다", primary: true, on: () => this.renderMoves() },
-      ...(canMega ? [{ label: "✨ 메가진화", on: () => this.act({ type: "mega" }) }] : []),
+      ...(canMega ? [{ label: "✨ 메가진화", on: () => this.chooseMega() }] : []),
       ...(canGmax ? [{ label: "✨ 거다이맥스", on: () => this.act({ type: "gmax" }) }] : []),
       ...(this.battleAllowCatch ? [{ label: "🎯 잡기", on: () => this.renderBalls() }] : []),
       { label: "🎒 가방", on: () => this.renderItems() },
       { label: "🔄 포켓몬", on: () => this.renderSwitch(false) },
       ...(b.kind === "wild" ? [{ label: "🏃 도망", on: () => this.act({ type: "run" }) }] : []),
     ]);
+  }
+  private chooseMega(): void {
+    const me = this.battle!.pActive();
+    const forms = megaForms(me.종_id);
+    if (forms.length <= 1) { this.act({ type: "mega", variant: 0 }); return; }
+    UI.print("메가스톤을 선택하세요. (X / Y)", "sys");
+    const btns: UI.Btn[] = forms.map((f, i) => {
+      const xy = f.식별자?.endsWith("-x") ? "X" : f.식별자?.endsWith("-y") ? "Y" : `${i + 1}`;
+      const bst = Object.values(f.종족값).reduce((a: number, b: any) => a + (b as number), 0);
+      return { label: `메가스톤 ${xy} — [${f.타입.join("·")}] 종족합 ${bst}`, primary: true, on: () => this.act({ type: "mega", variant: i }) };
+    });
+    btns.push({ label: "↩ 뒤로", on: () => this.renderBattle() });
+    UI.setActions(btns);
   }
   private renderMoves(): void {
     const me = this.battle!.pActive();
@@ -536,7 +556,7 @@ export class Game {
   }
   private boxView(): void {
     UI.head(`박스 (${this.p.box.length}마리)`);
-    if (this.p.box.length) UI.renderGrid(this.p.box.map((m) => ({ img: sprite(m.종_id), title: m.별명, sub: `Lv${m.level}` })));
+    if (this.p.box.length) UI.renderGrid(this.p.box.map((m) => ({ img: this.spr(m), title: `${m.shiny ? "✨" : ""}${m.별명}`, sub: `Lv${m.level}` })));
     else UI.print("박스가 비어 있다.", "dim");
     const btns: UI.Btn[] = [];
     if (this.p.box.length && this.p.party.length < 6) btns.push({ label: "맨 앞 박스 → 파티", on: () => { this.p.party.push(this.p.box.shift()!); this.persist(); this.boxView(); } });
@@ -658,7 +678,7 @@ export class Game {
   private partyView(): void {
     UI.head(`파티 (${this.p.party.length}/6)`);
     this.p.party.forEach((m, i) => {
-      UI.printHtml(`<div class="battlerow"><img class="spr md" src="${sprite(m.종_id)}"><div class="info">${i === 0 ? "▶ " : ""}<b>${m.별명}</b> Lv${m.level} [${m.types.join("·")}] ${m.성별}<br>${UI.hpBarHtml(m.curHP, m.maxHP)}<br><span class="dim">${m.nature} · ${m.moves.map((x) => x.name).join(", ")}</span></div></div>`);
+      UI.printHtml(`<div class="battlerow"><img class="spr md" src="${this.spr(m)}"><div class="info">${i === 0 ? "▶ " : ""}${m.shiny ? "✨" : ""}<b>${m.별명}</b> Lv${m.level} [${m.types.join("·")}] ${m.성별}<br>${UI.hpBarHtml(m.curHP, m.maxHP)}<br><span class="dim">${m.nature} · ${m.moves.map((x) => x.name).join(", ")}</span></div></div>`);
     });
     const btns: UI.Btn[] = [];
     this.p.party.forEach((m, i) => { if (i > 0) btns.push({ label: `${m.별명} 선두로`, on: () => { const [x] = this.p.party.splice(i, 1); this.p.party.unshift(x); this.persist(); this.partyView(); } }); });

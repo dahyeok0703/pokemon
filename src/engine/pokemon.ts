@@ -22,6 +22,7 @@ export interface Mon {
   status: string | null;
   types: string[];
   name: string;
+  shiny?: boolean;
   // 일시 변신(전투 한정)
   mega?: boolean;
   gmax?: number; // 남은 턴
@@ -90,7 +91,7 @@ export function expForLevel(group: string, level: number): number {
 
 export interface BuildOpts {
   nature?: string; ivFloor?: number; ivCeil?: number;
-  evs?: Partial<Record<Stat, number>>; 별명?: string;
+  evs?: Partial<Record<Stat, number>>; 별명?: string; shiny?: boolean;
 }
 export function buildMon(rng: RNG, speciesId: number, level: number, opts: BuildOpts = {}): Mon {
   const sp = SPECIES.get(speciesId)!;
@@ -105,7 +106,7 @@ export function buildMon(rng: RNG, speciesId: number, level: number, opts: Build
     uid: newUid(), 종_id: speciesId, 별명: opts.별명 ?? sp.이름.한, level, exp: 0,
     nature, 성별: sex, ivs, evs, stats: {} as any, maxHP: 0, curHP: 0,
     moves: makeSlots(chooseMoves(sp, level)), status: null, types: sp.타입.slice(),
-    name: sp.이름.한,
+    name: sp.이름.한, shiny: opts.shiny,
   };
   recalc(mon);
   mon.curHP = mon.maxHP;
