@@ -186,6 +186,32 @@ export function evolveTarget(mon: Mon): number | null {
   return null;
 }
 
+// 이 종으로 '진화해 들어오는' 최소 레벨(레벨진화면 그 값, 비레벨진화면 추정치)
+export function minLevelFor(id: number): number {
+  const sp = SPECIES.get(id);
+  const cond = sp?.진화?.조건;
+  const from = sp?.진화?.from?.id;
+  if (!from) return 1;
+  if (cond?.방식 === "레벨" && typeof cond.값 === "number") return cond.값;
+  return 30; // 돌/교환/친밀도 진화는 30레벨쯤부터 등장한다고 본다
+}
+
+// 주어진 레벨에 '맞는 진화 단계'로 내려준다. (저레벨 → 기본형, 고레벨 → 진화형)
+// 레벨에 따라 진화하는 시스템이므로, 최종진화형은 충분히 높은 레벨에서만 등장한다.
+export function appropriateStage(id: number, level: number): number {
+  let cur = id, guard = 0;
+  while (guard++ < 6) {
+    const sp = SPECIES.get(cur);
+    const from = sp?.진화?.from?.id;
+    const cond = sp?.진화?.조건;
+    if (!from) break;
+    const need = cond?.방식 === "레벨" && typeof cond.값 === "number" ? cond.값 : 30;
+    if (level < need) { cur = from; continue; }
+    break;
+  }
+  return cur;
+}
+
 export function fullHeal(mon: Mon): void {
   mon.curHP = mon.maxHP;
   mon.status = null;

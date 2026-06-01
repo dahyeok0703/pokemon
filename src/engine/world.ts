@@ -1,5 +1,6 @@
 import { RNG } from "./rng";
 import { SPECIES, Species, RARITY_WEIGHT } from "./data";
+import { appropriateStage } from "./pokemon";
 
 export type Method = "걷기" | "낚시" | "서핑" | "동굴" | "등산" | "야간" | "잠복";
 
@@ -160,14 +161,15 @@ export function rollEncounter(rng: RNG, loc: Location, method: Method, night: bo
     const id = rng.pick(loc.전설);
     if (SPECIES.has(id)) return { species: SPECIES.get(id)!, level: Math.max(level, hi + 8), legend: true };
   }
-  // 시그니처 희귀종 (가끔)
+  // 시그니처 희귀종 (가끔) — 레벨에 맞는 진화단계로
   if (loc.희귀종?.length && rng.rand() < (method === "잠복" ? 0.22 : 0.08)) {
     const id = rng.pick(loc.희귀종);
-    if (SPECIES.has(id)) return { species: SPECIES.get(id)!, level, legend: false };
+    if (SPECIES.has(id)) { const st = appropriateStage(id, level); return { species: SPECIES.get(st)!, level, legend: false }; }
   }
   const pool = encounterPool(loc, method, night);
   let weights = pool.map((s) => RARITY_WEIGHT[s.희귀도] ?? 1);
   if (method === "잠복") weights = pool.map((s) => (s.희귀도 === "희귀" || s.희귀도 === "매우희귀" ? 30 : RARITY_WEIGHT[s.희귀도]));
-  const species = rng.weighted(pool, weights);
-  return { species, level, legend: false };
+  const picked = rng.weighted(pool, weights);
+  const staged = appropriateStage(picked.id, level); // 레벨에 맞는 단계(저렙=기본형)
+  return { species: SPECIES.get(staged) ?? picked, level, legend: false };
 }

@@ -1,6 +1,6 @@
 import { RNG } from "./rng";
 import { SPECIES, Species, RARITY_WEIGHT } from "./data";
-import { buildMon, Mon } from "./pokemon";
+import { buildMon, Mon, appropriateStage } from "./pokemon";
 
 export const LICENSE_ORDER = ["신인", "정규", "상급", "마스터"];
 export function licenseRank(l: string): number { return Math.max(0, LICENSE_ORDER.indexOf(l)); }
@@ -51,12 +51,20 @@ export function genTrainerTeam(rng: RNG, level: number, rules: any, count: numbe
   let guard = 0;
   while (team.length < count && guard++ < 200) {
     const sp = rng.weighted(pool, weights);
-    if (rules?.동일종_금지 !== false && used.has(sp.id)) continue;
-    used.add(sp.id);
     const lv = Math.max(2, level - rng.int(0, 2));
-    team.push(buildMon(rng, sp.id, lv, { ivFloor: 12, ivCeil: 28 }));
+    const staged = appropriateStage(sp.id, lv); // 레벨에 맞는 진화단계
+    if (rules?.동일종_금지 !== false && used.has(staged)) continue;
+    used.add(staged);
+    team.push(buildMon(rng, staged, lv, { ivFloor: 16, ivCeil: 31 })); // 경쟁률↑ : 잘 키운 상대
   }
   return team;
+}
+
+// 대회 참가 규모(경쟁률) — 신인배조차 어마어마하다
+export function entrantCount(t: any): number {
+  const base: Record<string, number> = { 로컬: 1500, 지방: 6000, 국가: 30000, 대륙: 120000, 세계: 800000, 특수: 8000 };
+  const b = base[t.티어] ?? 1000;
+  return b + (hashId(t.id ?? t.이름 ?? "") % b);
 }
 
 // ── 접수 가능 시간(시간 개념) ──────────────────────────────
@@ -90,7 +98,12 @@ export function trophyName(t: any): string {
 // 대회 라운드 구조 → 인터랙티브 라운드(상대 트레이너) 목록(최대 4)
 export interface RoundDef { 이름: string; teamSize: number; }
 export function buildRounds(t: any): RoundDef[] {
-  const labels: string[] = t.라운드_구조?.라운드 ?? ["8강", "4강", "결승"];
-  const tail = labels.slice(-3); // 막판 3라운드만 인터랙티브
-  return tail.map((lbl, i) => ({ 이름: lbl, teamSize: Math.min(3, 1 + i) }));
+  const labels: string[] = t.라운드_구조?.라운드 ?? ["예선", "16강", "8강", "4강", "결승"];
+  const tail = labels.slice(-5); // 막판 최대 5라운드 인터랙티브
+  const n = tail.length;
+  return tail.map((lbl, i) => {
+    let size = Math.min(3, 1 + Math.floor((i * 3) / n)); // 1 → 3 점증
+    if (i === n - 1) size = 3; // 결승은 풀파티
+    return { 이름: lbl, teamSize: size };
+  });
 }

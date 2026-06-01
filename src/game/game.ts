@@ -1,12 +1,12 @@
 import { RNG } from "../engine/rng";
 import { SPECIES, MOVES, RARITY_WEIGHT, TOURNAMENTS, speciesName, Species } from "../engine/data";
-import { buildMon, Mon, fullHeal, applyLearn } from "../engine/pokemon";
+import { buildMon, Mon, fullHeal, applyLearn, appropriateStage } from "../engine/pokemon";
 import { Battle, Action } from "../engine/battle";
 import { BALLS } from "../engine/catch";
-import { eligible, licenseFor, genTrainerTeam, buildRounds, tierLevel, RoundDef, isOpen, regWindow, trophyName } from "../engine/tournament";
+import { eligible, licenseFor, genTrainerTeam, buildRounds, tierLevel, RoundDef, isOpen, regWindow, trophyName, entrantCount } from "../engine/tournament";
 import { WORLD, CONTINENTS, locsByContinent, LOC_BY_ID, rollEncounter, Method, Location } from "../engine/world";
 import { artwork, sprite } from "../engine/sprites";
-import { npcsPresent, npcChat, npcHint, NPC, NPC_TOTAL } from "../engine/npc";
+import { npcsPresent, npcChat, npcHint, NPC, NPC_TOTAL, pickFamous, displayName } from "../engine/npc";
 import { generateReactions } from "../engine/reactions";
 import { Player, newPlayer, save, load, hasSave, wipe, seen, caught } from "./save";
 import * as UI from "../ui/ui";
@@ -19,32 +19,39 @@ const GEN_RANGES: [number, number][] = [
   [1, 151], [152, 251], [252, 386], [387, 493], [494, 649], [650, 721], [722, 809], [810, 905], [906, 1025],
 ];
 const ALL_TYPES = ["노말","불꽃","물","풀","전기","얼음","격투","독","땅","비행","에스퍼","벌레","바위","고스트","드래곤","악","강철","페어리"];
+// 지구상 단 하나의 정점
+const GRAND_TOURNAMENT = "W-01";
 
 // 스타팅 가능 풀: 전설/환상 제외
 const STARTER_POOL: Species[] = Array.from(SPECIES.values()).filter((s) => s.희귀도 !== "전설" && s.희귀도 !== "환상");
 
-const ARCHETYPES = [
-  (sp: Species, loc: Location) => [
-    `당신은 ${loc.이름}의 생태 연구소 보조였다.`,
-    `어느 날 ${loc.기후} 지대에서 다친 어린 ${sp.이름.한}을(를) 발견해 밤새 돌봤고,`,
-    `회복한 그 ${sp.분류 || "포켓몬"}은(는) 당신 곁을 떠나지 않았다. 그렇게 당신의 첫 파트너가 되었다.`,
-  ],
-  (sp: Species, loc: Location) => [
-    `당신의 가족은 대대로 ${loc.이름}에서 재난구조대로 일해 왔다.`,
-    `${sp.이름.한}은(는) 할아버지가 마지막 출동에서 구한 포켓몬의 후손으로, 가문이 함께 키워 왔다.`,
-    `이제 그 인연을 이어받아, 당신과 ${sp.이름.한}이(가) 세상으로 나선다.`,
-  ],
-  (sp: Species, loc: Location) => [
-    `세계를 떠도는 유랑 트레이너였던 당신은 ${loc.이름}에 잠시 머물렀다.`,
-    `그곳 ${loc.기후} 지대에서 ${sp.이름.한}와(과) 맺은 우정이 너무 깊어, 함께 길을 떠나기로 했다.`,
-    `${sp.분류 || "그 포켓몬"}답게, ${sp.이름.한}은(는) 낯선 길을 두려워하지 않는다.`,
-  ],
-  (sp: Species, loc: Location) => [
-    `${loc.이름} 토박이인 당신은 어릴 때부터 ${sp.서식_환경 || "그 지역"}을 누비며 자랐다.`,
-    `동네에서 가장 영리한 ${sp.이름.한}이(가) 면허를 딴 당신을 스스로 따라나섰다.`,
-    `둘은 이미 서로를 누구보다 잘 안다.`,
-  ],
+interface Archetype { fit?: string[]; lines: (sp: Species, loc: Location) => string[]; }
+const BACKGROUNDS: Archetype[] = [
+  { fit: ["불꽃"], lines: (sp, loc) => [`당신의 가문은 ${loc.이름}에서 대대로 대장간을 운영해 왔다.`, `용광로의 불 곁에서 자란 ${sp.이름.한}은(는) 집안의 수호신 같은 존재였고, 면허를 딴 당신을 따라나섰다.`] },
+  { fit: ["물"], lines: (sp, loc) => [`바다를 끼고 사는 ${loc.이름}의 어부 집안에서 태어난 당신.`, `파도에 휩쓸린 당신을 구해준 ${sp.이름.한}와(과)의 인연이, 이제 함께하는 여정으로 이어진다.`] },
+  { fit: ["풀", "벌레"], lines: (sp, loc) => [`식물학자였던 부모를 따라 ${loc.기후}의 숲을 누비며 자란 당신.`, `숲에서 가장 먼저 마음을 연 ${sp.이름.한}이(가) 당신의 첫 파트너가 되었다.`] },
+  { fit: ["전기", "강철"], lines: (sp, loc) => [`${loc.이름}의 거대 발전소·공장 지대에서 엔지니어로 일하던 당신.`, `정비실에 자주 드나들던 ${sp.이름.한}와(과) 손발이 맞았고, 둘은 함께 세상에 나섰다.`] },
+  { fit: ["얼음"], lines: (sp, loc) => [`극한의 ${loc.기후} 지대, 빙벽을 오르는 탐험가의 피가 흐르는 당신.`, `눈보라 속에서 길을 안내해 준 ${sp.이름.한}, 그 신뢰가 여정의 시작이 되었다.`] },
+  { fit: ["격투"], lines: (sp, loc) => [`${loc.이름}의 오래된 도장에서 무도를 수련하며 자란 당신.`, `함께 땀 흘린 ${sp.이름.한}은(는) 스승이자 동료. 이제 더 넓은 무대를 향한다.`] },
+  { fit: ["에스퍼", "페어리"], lines: (sp, loc) => [`예부터 영험하다 전해지는 ${loc.이름}에서, 당신은 기묘한 직감을 타고났다.`, `그 힘에 이끌리듯 나타난 ${sp.이름.한}와(과) 마음이 통했다.`] },
+  { fit: ["고스트", "악"], lines: (sp, loc) => [`${loc.이름}의 그늘진 뒷골목과 폐허를 떠돌던 당신.`, `누구도 곁을 주지 않을 때, ${sp.이름.한}만이 당신 옆에 남았다. 둘은 서로의 전부다.`] },
+  { fit: ["바위", "땅"], lines: (sp, loc) => [`${loc.이름}의 광산·협곡에서 지질을 조사하던 당신.`, `갱도가 무너지던 날 당신을 파낸 ${sp.이름.한}, 그 빚이 우정이 되었다.`] },
+  { fit: ["드래곤"], lines: (sp, loc) => [`용의 전설이 깃든 ${loc.이름}, 그 전승을 지키는 가문의 후예인 당신.`, `시험을 통과한 자에게만 마음을 연다는 ${sp.이름.한}이(가) 당신을 택했다.`] },
+  { fit: ["비행"], lines: (sp, loc) => [`${loc.이름}의 하늘을 동경하며 자란 당신은 우편·관측 비행을 도왔다.`, `늘 곁을 맴돌던 ${sp.이름.한}와(과) 함께, 더 먼 하늘로 떠난다.`] },
+  { fit: ["독"], lines: (sp, loc) => [`${loc.이름}의 약방에서 약초와 독을 다루던 당신.`, `위험한 늪에서 길잡이가 되어준 ${sp.이름.한}, 둘은 그렇게 한 팀이 되었다.`] },
+  { fit: ["노말"], lines: (sp, loc) => [`${loc.이름} 토박이인 당신은 어릴 때부터 동네를 누비며 자랐다.`, `가장 영리한 ${sp.이름.한}이(가) 면허를 딴 당신을 스스로 따라나섰다. 둘은 이미 서로를 누구보다 잘 안다.`] },
+  // 범용(타입 무관)
+  { lines: (sp, loc) => [`${loc.이름}의 생태 연구소 보조였던 당신.`, `다친 어린 ${sp.이름.한}을(를) 밤새 돌본 인연으로, 회복한 그 ${sp.분류 || "포켓몬"}은(는) 당신의 첫 파트너가 되었다.`] },
+  { lines: (sp, loc) => [`대대로 ${loc.이름}에서 재난구조대로 일한 가문의 당신.`, `할아버지가 구한 포켓몬의 후손 ${sp.이름.한}을(를) 물려받아 세상으로 나선다.`] },
+  { lines: (sp, loc) => [`세계를 떠돌던 유랑자였던 당신은 ${loc.이름}에 머물렀다.`, `그곳에서 ${sp.이름.한}와(과) 맺은 우정이 깊어, 함께 길을 떠나기로 했다.`] },
+  { lines: (sp, loc) => [`평범했던 ${loc.이름}의 학생이던 당신, 면허 시험을 막 통과했다.`, `오래 함께한 ${sp.이름.한}와(과) 드디어 진짜 여정을 시작한다.`] },
 ];
+function backgroundFor(sp: Species, loc: Location, rng: RNG): string[] {
+  const typed = BACKGROUNDS.filter((b) => b.fit && b.fit.some((t) => sp.타입.includes(t)));
+  const generic = BACKGROUNDS.filter((b) => !b.fit);
+  const pool = typed.length && rng.rand() < 0.78 ? typed : generic;
+  return rng.pick(pool).lines(sp, loc);
+}
 
 export class Game {
   p!: Player;
@@ -139,7 +146,7 @@ export class Game {
     // 출신지: 스타터 타입에 맞는 거점 지역
     const cities = WORLD.filter((l) => l.도시 && l.주요타입.some((t) => sp.타입.includes(t)));
     const loc = (cities.length ? this.rng.pick(cities) : this.rng.pick(WORLD.filter((l) => l.도시)));
-    const bgLines = this.rng.pick(ARCHETYPES)(sp, loc);
+    const bgLines = backgroundFor(sp, loc, this.rng);
     UI.clearLog();
     UI.bigImage(artwork(id), `${sp.이름.한}  [${sp.타입.join("·")}]`);
     UI.print(`${sp.분류} · 종족값합 ${Object.values(sp.종족값).reduce((a, b) => a + b, 0)} · 희귀도 ${sp.희귀도}`, "dim");
@@ -283,32 +290,49 @@ export class Game {
     const loc = this.loc();
     UI.head(`${loc.이름}의 사람들`);
     UI.print(`전 세계에 ${NPC_TOTAL.toLocaleString()}명의 트레이너가 살아간다. 지금 이곳에 보이는 이들:`, "dim");
-    const here = npcsPresent(loc.id, this.p.날짜.일, 8);
-    const btns: UI.Btn[] = here.map((n) => ({ label: `${n.호칭} ${n.이름} (Lv${this.npcLevel(n)}급)`, on: () => this.npcInteract(n) }));
+    let here = npcsPresent(loc.id, this.p.날짜.일, 8);
+    // 가끔 유명 트레이너가 이 도시에 방문 중
+    if (this.rng.rand() < 0.4) { const f = pickFamous(this.rng); if (!here.find((x) => x.id === f.id)) here = [f, ...here].slice(0, 9); }
+    const btns: UI.Btn[] = here.map((n) => ({ label: `${n.famous ? "⭐ " : ""}${displayName(n)} (Lv${this.npcLevel(n)}급)`, on: () => this.npcInteract(n) }));
     btns.push({ label: "↩ 돌아가기", on: () => this.hub() });
     UI.setActions(btns);
   }
-  private npcLevel(n: NPC): number { return Math.max(3, Math.round(this.partyAvg() + (n.tier - 3) * 2 + this.rng.int(-1, 1))); }
+  private npcLevel(n: NPC): number {
+    const base = this.partyAvg() + (n.tier - 3) * 2 + this.rng.int(-1, 1);
+    return Math.max(3, Math.round(n.famous ? Math.max(base, this.partyAvg() + 6) : base));
+  }
+  // NPC 파티 구성: 유명 트레이너는 시그니처 에이스 + 정예 필러
+  private npcTeam(n: NPC, lv: number, size: number): Mon[] {
+    if (n.famous && n.에이스) {
+      const fillers = genTrainerTeam(this.rng, lv, {}, Math.max(0, size - 1));
+      const aceId = appropriateStage(n.에이스, lv);
+      const ace = buildMon(this.rng, aceId, lv, { ivFloor: 26, ivCeil: 31, evs: { 공격: 200, 스피드: 200, HP: 100 } });
+      return [...fillers, ace]; // 에이스를 마지막에
+    }
+    return genTrainerTeam(this.rng, lv, {}, size);
+  }
   private npcInteract(n: NPC): void {
     UI.clearLog();
-    UI.print(`${n.호칭} ${n.이름} — ${n.성격} 성격`, "head");
+    if (n.famous) UI.bigImage(artwork(n.에이스!), `${displayName(n)} — 에이스 ${this.spName(n.에이스!)}`);
+    UI.print(`${displayName(n)} — ${n.성격} 성격${n.famous ? " · ⭐ 세계적 명성" : ""}`, "head");
     UI.printHtml(`<span class="npc">"${n.인사}"</span>`);
     UI.setActions([
       { label: "💬 대화", primary: true, on: () => { this.p.npc전적.만남++; UI.printHtml(`<span class="npc">"${npcChat(this.rng)}"</span>`); if (this.rng.rand() < 0.12) { const it = this.rng.pick(["몬스터볼", "상처약", "슈퍼볼"]); this.p.인벤토리[it] = (this.p.인벤토리[it] ?? 0) + 1; UI.print(`${n.이름}이(가) ${it}을(를) 건넸다!`, "good"); } this.persist(); } },
-      { label: "⚔️ 대결 신청", primary: true, on: () => this.npcBattle(n) },
+      { label: n.famous ? "⚔️ 명사에게 도전!" : "⚔️ 대결 신청", primary: true, on: () => this.npcBattle(n) },
       { label: "🧭 정보 듣기", on: () => { UI.printHtml(`<span class="npc">"${npcHint(this.rng)}"</span>`); } },
       { label: "↩ 돌아가기", on: () => this.npcMenu() },
     ]);
   }
+  private spName(id: number): string { return SPECIES.get(id)?.이름.한 ?? `#${id}`; }
   private npcBattle(n: NPC): void {
     if (!this.p.party.some((m) => m.curHP > 0)) { UI.print("싸울 포켓몬이 없다.", "warn"); return; }
     const lv = this.npcLevel(n);
-    const size = Math.min(4, 1 + Math.floor(n.tier / 2) + (this.rng.rand() < 0.4 ? 1 : 0));
-    const enemy = genTrainerTeam(this.rng, lv, {}, size);
-    UI.clearLog(); UI.print(`${n.호칭} ${n.이름}와(과)의 대결! (${size}마리)`, "sys");
-    this.startBattle(enemy, "trainer", `${n.이름}`, false, (b) => {
+    const size = n.famous ? Math.min(6, 4 + (this.rng.rand() < 0.5 ? 1 : 0)) : Math.min(4, 1 + Math.floor(n.tier / 2) + (this.rng.rand() < 0.4 ? 1 : 0));
+    const enemy = this.npcTeam(n, lv, size);
+    UI.clearLog(); UI.print(`${displayName(n)}와(과)의 대결! (${size}마리)`, "sys");
+    this.startBattle(enemy, "trainer", displayName(n), false, (b) => {
       UI.print("");
-      if (b.state === "win") { const g = lv * this.rng.int(50, 100); this.addMoney(g, "배틀 상금"); const fame = 2 + n.tier; this.p.명성 += fame; this.p.npc전적.승리++; UI.print(`명성 +${fame}`, "dim"); UI.printHtml(`<span class="npc">"졌다… 강하네요. 다음엔 안 져요!"</span>`); this.updateLicense(); }
+      if (b.state === "win") { const g = lv * this.rng.int(50, 100) * (n.famous ? 3 : 1); this.addMoney(g, "배틀 상금"); const fame = (2 + n.tier) * (n.famous ? 4 : 1); this.p.명성 += fame; this.p.npc전적.승리++; UI.print(`명성 +${fame}`, "dim"); UI.printHtml(`<span class="npc">"${n.famous ? "훌륭하군. 자네 이름, 기억해두지." : "졌다… 강하네요!"}"</span>`); this.updateLicense(); }
       else if (b.state === "lose") { this.p.npc전적.패배++; this.whiteOut(); return; }
       for (const m of this.p.party) fullHeal(m);
       this.persist();
@@ -463,7 +487,8 @@ export class Game {
       const el = eligible(this.p, t); const lv = tierLevel(t.티어, t.특수룰, this.partyAvg());
       const open = isOpen(t, this.p.날짜.월, this.p.날짜.일, this.p.시각);
       const tag = !el.ok ? "🔒자격" : open ? "🟢접수중" : "🔴마감";
-      return { label: `${t.이름} [${t.티어}] Lv≤${lv} ${tag}`, on: () => {
+      const star = t.id === GRAND_TOURNAMENT ? "🌟[세계최강] " : "";
+      return { label: `${star}${t.이름} [${t.티어}] Lv≤${lv} ${tag}`, on: () => {
         if (!el.ok) { UI.print(`출전 불가: ${el.reasons.join(", ")}`, "warn"); return; }
         if (!open) { UI.print(`지금은 접수 기간이 아니다. 접수: ${regWindow(t).text}`, "warn"); return; }
         this.tournamentEnter(t);
@@ -477,16 +502,20 @@ export class Game {
     UI.head("티어별 대회");
     UI.setActions(["로컬", "지방", "국가", "대륙", "세계", "특수"].map((tier) => ({ label: tier, on: () => {
       UI.head(`${tier} 대회 (일부)`);
-      TOURNAMENTS.filter((t) => t.티어 === tier).slice(0, 12).forEach((t) => { const el = eligible(this.p, t); UI.print(`${el.ok ? "✅" : "🔒"} ${t.이름} @${t.현실_개최지?.도시} — 명성${t.출전_자격?.최소_명성}/${t.출전_자격?.면허_등급}`, el.ok ? undefined : "dim"); });
+      TOURNAMENTS.filter((t) => t.티어 === tier).slice(0, 12).forEach((t) => { const el = eligible(this.p, t); const star = t.id === GRAND_TOURNAMENT ? "🌟[세계최강] " : ""; UI.print(`${star}${el.ok ? "✅" : "🔒"} ${t.이름} @${t.현실_개최지?.도시} — 명성${t.출전_자격?.최소_명성}/${t.출전_자격?.면허_등급} · 접수 ${regWindow(t).text}`, el.ok ? undefined : "dim"); });
       UI.setActions([{ label: "↩ 티어 목록", on: () => this.tournamentBrowse() }, { label: "↩ 허브", on: () => this.hub() }]);
     } })).concat([{ label: "↩ 돌아가기", on: () => this.tournamentList() }]));
   }
   private tournamentEnter(t: any): void {
     if (!isOpen(t, this.p.날짜.월, this.p.날짜.일, this.p.시각)) { UI.print(`접수 기간이 아니다. 접수: ${regWindow(t).text}`, "warn"); return; }
     if (!this.p.party.some((m) => m.curHP > 0)) { UI.print("출전할 포켓몬이 없다. 회복하자.", "warn"); return; }
-    UI.clearLog(); UI.print(`『${t.이름}』 출전 등록!`, "head"); UI.print(t.설명 ?? "", "dim");
+    UI.clearLog();
+    if (t.id === GRAND_TOURNAMENT) UI.print("🌟 지구상 단 하나의 정점 — 세계 최고의 대회 🌟", "head");
+    UI.print(`『${t.이름}』 출전 등록!`, "head"); UI.print(t.설명 ?? "", "dim");
+    const entrants = entrantCount(t);
+    UI.print(`참가 신청 ${entrants.toLocaleString()}명 — 살벌한 예선을 뚫고 본선에 진출했다!`, "warn");
     const lv = tierLevel(t.티어, t.특수룰, this.partyAvg());
-    UI.print(`상대 예상 레벨 ≤ ${lv}.`, "sys");
+    UI.print(`상대 예상 레벨 ≤ ${lv}. 본선부터는 한 번만 져도 탈락.`, "sys");
     for (const m of this.p.party) fullHeal(m);
     this.tour = { t, rounds: buildRounds(t), idx: 0 }; this.advanceHours(3); this.tournamentRound();
   }
@@ -494,9 +523,24 @@ export class Game {
     const tour = this.tour!;
     if (tour.idx >= tour.rounds.length) { this.tournamentWin(); return; }
     const rd = tour.rounds[tour.idx]; const lv = tierLevel(tour.t.티어, tour.t.특수룰, this.partyAvg());
-    const enemy = genTrainerTeam(this.rng, lv, tour.t.특수룰, rd.teamSize);
-    UI.head(`${rd.이름}`); UI.print(`상대 트레이너(${rd.teamSize}마리)와 대결!`, "sys");
-    this.startBattle(enemy, "trainer", `${rd.이름} 상대`, false, (b) => {
+    const isFinal = tour.idx === tour.rounds.length - 1;
+    const bigTier = ["국가", "대륙", "세계", "특수"].includes(tour.t.티어);
+    // 결승, 혹은 큰 대회 후반엔 유명 트레이너(명사)가 자주 등장
+    const useFamous = isFinal || (bigTier && tour.idx >= tour.rounds.length - 2 && this.rng.rand() < 0.7);
+    let label: string, enemy: Mon[], oppName = "";
+    if (useFamous) {
+      const f = pickFamous(this.rng);
+      oppName = displayName(f);
+      enemy = this.npcTeam(f, lv, Math.min(6, rd.teamSize + (isFinal ? 2 : 1)));
+      UI.head(`${rd.이름} — ⭐ ${oppName}`);
+      UI.printHtml(`<span class="npc">"${f.인사}"</span>`);
+      UI.print(`에이스: ${this.spName(f.에이스!)}. 만만치 않은 상대다!`, "warn");
+    } else {
+      enemy = genTrainerTeam(this.rng, lv, tour.t.특수룰, rd.teamSize);
+      oppName = `${rd.이름} 상대`;
+      UI.head(`${rd.이름}`); UI.print(`정예 트레이너(${rd.teamSize}마리)와 대결!`, "sys");
+    }
+    this.startBattle(enemy, "trainer", oppName, false, (b) => {
       UI.print("");
       if (b.state === "win") { UI.print(`${rd.이름} 승리!`, "good"); tour.idx++; for (const m of this.p.party) fullHeal(m); UI.setActions([{ label: tour.idx >= tour.rounds.length ? "결과 확인" : "다음 라운드", primary: true, on: () => this.tournamentRound() }]); }
       else this.tournamentLose();
@@ -507,7 +551,13 @@ export class Game {
     this.p.소지금 += prize; this.p.명성 += fame;
     this.p.대회_전적.push({ id: t.id, 이름: t.이름, 결과: "우승", 명성: fame, 상금: prize });
     const trophy = trophyName(t); this.p.트로피.push(trophy);
+    const grand = t.id === GRAND_TOURNAMENT;
     UI.clearLog();
+    if (grand) {
+      UI.print("👑👑👑  세 계 최 강  👑👑👑", "head");
+      if (!this.p.스토리_플래그.includes("세계_챔피언")) this.p.스토리_플래그.push("세계_챔피언");
+      UI.print(`${this.p.이름}, 당신은 마침내 지구상 단 하나의 정점에 올랐다. 전 세계가 당신의 이름을 부른다.`, "good");
+    }
     UI.head(`🏆 ${t.이름} 우승!`); UI.print(`상금 ₩${prize.toLocaleString()} · 명성 +${fame}`, "good");
     UI.print(`트로피 획득: ${trophy} (가방에 보관됨)`, "good");
     const reward = t.보상_아이템?.[0]; if (reward) UI.print(`보상: ${reward.아이템}`, "good");

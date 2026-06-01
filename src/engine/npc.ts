@@ -26,21 +26,35 @@ const HINT = [
   "물가에서 낚시하면 의외의 대물이 걸려요.","동굴 깊은 곳엔 강한 개체가 있어요.","고지대 등산은 위험하지만 보상도 커요.",
 ];
 
-export interface NPC { id: number; 이름: string; 호칭: string; locId: string; 성격: string; 인사: string; tier: number; }
+// 유명 트레이너 칭호 & 에이스 풀(강력한 최종진화/유사전설)
+const FAMOUS_TITLES = ["불꽃의 명인","북방의 빙제","심해의 지배자","번개추적자","대지의 수호자","창공의 매","유령술사","강철의 벽",
+  "맹독의 여왕","요정 군주","용의 후예","그림자칼날","태양의 투사","폭풍을 부르는 자","천년의 현자","바위산의 거인",
+  "독설가","쌍검사","사막의 매","오로라의 무희","불사조","해일","지진","월광","혜성","검은표범","백은의 기사","홍련","질풍","현무"];
+const ACE_POOL = [6,9,3,149,248,257,282,373,376,445,448,462,530,609,612,635,658,663,700,706,784,887,901,248,330,409,612,621];
+export const FAMOUS_COUNT = 160;
+
+export interface NPC { id: number; 이름: string; 호칭: string; locId: string; 성격: string; 인사: string; tier: number; famous: boolean; 칭호?: string; 에이스?: number; }
 
 export function makeNPC(id: number): NPC {
   const r = new RNG((id * 2654435761) >>> 0, 7);
   const 이름 = r.pick(SURNAME) + r.pick(GIVEN);
   const loc = WORLD[id % WORLD.length];
+  const famous = id < FAMOUS_COUNT;
   return {
     id, 이름,
-    호칭: r.pick(TITLE),
+    호칭: famous ? "명사 트레이너" : r.pick(TITLE),
     locId: loc.id,
     성격: r.pick(TRAIT),
-    인사: r.pick(GREET),
-    tier: 1 + (id % 5), // 1~5 강함
+    인사: famous ? "오, 도전자인가? 명성에 누가 되지 않게 해보겠네." : r.pick(GREET),
+    tier: famous ? 6 : 1 + (id % 5),
+    famous,
+    칭호: famous ? FAMOUS_TITLES[id % FAMOUS_TITLES.length] : undefined,
+    에이스: famous ? ACE_POOL[id % ACE_POOL.length] : undefined,
   };
 }
+
+export function displayName(n: NPC): string { return n.famous && n.칭호 ? `[${n.칭호}] ${n.이름}` : `${n.호칭} ${n.이름}`; }
+export function pickFamous(rng: RNG): NPC { return makeNPC(rng.int(0, FAMOUS_COUNT - 1)); }
 
 let _byLoc: Map<string, number[]> | null = null;
 export function npcsAtLocation(locId: string): NPC[] {
