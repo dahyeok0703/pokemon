@@ -26,6 +26,7 @@ export interface Player {
   npc전적: { 만남: number; 승리: number; 패배: number };
   npc친밀도: Record<number, number>;
   npc재대결: Record<number, number>;
+  소멸_전설: number[];
   스토리_플래그: string[];
   rng: { seed: number; counter: number };
   날짜: { 년: number; 월: number; 일: number };
@@ -41,7 +42,7 @@ export function newPlayer(name: string, locId: string, 배경: string): Player {
     인벤토리: { 몬스터볼: 8, 슈퍼볼: 0, 하이퍼볼: 0, 상처약: 5, 고급상처약: 1 },
     트로피: [],
     소지금: 30000, 명성: 0, 도감_본: [], 도감_잡은: [],
-    대회_전적: [], npc전적: { 만남: 0, 승리: 0, 패배: 0 }, npc친밀도: {}, npc재대결: {}, 스토리_플래그: [],
+    대회_전적: [], npc전적: { 만남: 0, 승리: 0, 패배: 0 }, npc친밀도: {}, npc재대결: {}, 소멸_전설: [], 스토리_플래그: [],
     rng: { seed: randomSeed(), counter: 0 },
     날짜: { 년: 2035, 월: 6, 일: 1 }, 시각: 9,
   };
@@ -58,8 +59,9 @@ function migrate(p: any): Player {
   if (!p.npc전적) p.npc전적 = { 만남: 0, 승리: 0, 패배: 0 };
   if (!p.npc친밀도) p.npc친밀도 = {};
   if (!p.npc재대결) p.npc재대결 = {};
+  if (!p.소멸_전설) p.소멸_전설 = [];
   if (typeof p.시각 !== "number") p.시각 = p.밤 ? 21 : 13;
-  p.버전 = 4;
+  p.버전 = 5;
   return p as Player;
 }
 

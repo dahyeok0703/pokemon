@@ -131,6 +131,33 @@ export const CONTINENTS = ["아시아", "유럽", "북미", "남미", "아프리
 export const LOC_BY_ID = new Map(WORLD.map((l) => [l.id, l]));
 export function locsByContinent(c: string): Location[] { return WORLD.filter((l) => l.대륙 === c); }
 
+// ── 전설/환상 레지스트리 ───────────────────────────────────
+function ih(n: number): number { n = (n ^ 61) ^ (n >>> 16); n = n + (n << 3); n = n ^ (n >>> 4); n = Math.imul(n, 0x27d4eb2d); n = n ^ (n >>> 15); return n >>> 0; }
+let _legendHome: Map<number, string> | null = null;
+let _mythicals: number[] | null = null;
+function buildRegistry(): void {
+  _legendHome = new Map(); _mythicals = [];
+  for (const sp of SPECIES.values()) {
+    if (sp.희귀도 === "전설") {
+      let best = WORLD[0], bestScore = -1;
+      for (const l of WORLD) {
+        const overlap = l.주요타입.filter((t) => sp.타입.includes(t)).length;
+        const score = overlap * 4 + (l.도시 ? 0 : 1) + (ih(sp.id * 131 + ih(l.id.length + l.id.charCodeAt(0))) % 3);
+        if (score > bestScore) { bestScore = score; best = l; }
+      }
+      _legendHome.set(sp.id, best.id);
+    } else if (sp.희귀도 === "환상") {
+      _mythicals.push(sp.id);
+    }
+  }
+}
+export function legendHome(id: number): string | undefined { if (!_legendHome) buildRegistry(); return _legendHome!.get(id); }
+export function legendariesAt(locId: string): number[] { if (!_legendHome) buildRegistry(); return [..._legendHome!].filter(([, l]) => l === locId).map(([id]) => id); }
+export function mythicalList(): number[] { if (!_mythicals) buildRegistry(); return _mythicals!; }
+// 환상은 3일마다 위치를 옮긴다(전 세계 어디든)
+export function mythLocation(id: number, absDay: number): string { return WORLD[ih(id * 97 + Math.floor(absDay / 3) * 7) % WORLD.length].id; }
+export function mythicalsAt(locId: string, absDay: number): number[] { return mythicalList().filter((id) => mythLocation(id, absDay) === locId); }
+
 // 방식+시간대에 맞는 출현 풀과 레벨
 export function encounterPool(loc: Location, method: Method, night: boolean): Species[] {
   let types = METHOD_TYPES[method].slice();
@@ -144,9 +171,9 @@ export function encounterPool(loc: Location, method: Method, night: boolean): Sp
   return pool;
 }
 
-export interface Encounter { species: Species; level: number; legend: boolean; }
+export interface Encounter { species: Species; level: number; legend: boolean; mythical?: boolean; }
 
-export function rollEncounter(rng: RNG, loc: Location, method: Method, night: boolean): Encounter {
+export function rollEncounter(rng: RNG, loc: Location, method: Method, night: boolean, absDay = 0, consumed: number[] = []): Encounter {
   const [lo, hi] = loc.레벨;
   let level = rng.int(lo, hi);
   // 현실성: 저렙~고렙이 마구잡이로 섞인다. 가끔 약골/거물이 튀어나온다.
@@ -156,11 +183,16 @@ export function rollEncounter(rng: RNG, loc: Location, method: Method, night: bo
   else if (r > 0.80) level = Math.min(100, hi + rng.int(2, 8));     // 강한 개체
   if (method === "잠복" || method === "동굴" || method === "등산") level = Math.min(100, level + rng.int(0, 4));
 
-  // 배회 전설 (잠복에서만, 매우 드묾)
-  if (method === "잠복" && loc.전설?.length && rng.rand() < 1 / 90) {
-    const id = rng.pick(loc.전설);
-    if (SPECIES.has(id)) return { species: SPECIES.get(id)!, level: Math.max(level, hi + 8), legend: true };
+  // 전설(이 지역 고정 서식) + 환상(현재 이 지역에 들름) — 미소멸 개체만, 각 1마리
+  const specials = [
+    ...legendariesAt(loc.id).map((id) => ({ id, myth: false })),
+    ...mythicalsAt(loc.id, absDay).map((id) => ({ id, myth: true })),
+  ].filter((c) => !consumed.includes(c.id) && SPECIES.has(c.id));
+  if (specials.length && rng.rand() < (method === "잠복" ? 0.09 : 0.035)) {
+    const c = rng.pick(specials);
+    return { species: SPECIES.get(c.id)!, level: rng.int(58, 72), legend: true, mythical: c.myth };
   }
+
   // 시그니처 희귀종 (가끔) — 레벨에 맞는 진화단계로
   if (loc.희귀종?.length && rng.rand() < (method === "잠복" ? 0.22 : 0.08)) {
     const id = rng.pick(loc.희귀종);

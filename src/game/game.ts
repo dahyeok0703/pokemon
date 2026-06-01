@@ -98,6 +98,15 @@ export class Game {
   private loc(): Location { return LOC_BY_ID.get(this.p.현재_장소) ?? WORLD[0]; }
   private partyAvg(): number { const a = this.p.party; return a.length ? Math.round(a.reduce((s, m) => s + m.level, 0) / a.length) : 5; }
   private addMoney(n: number, why: string): void { this.p.소지금 += n; UI.print(`💰 ₩${n.toLocaleString()} 획득 (${why})`, "dim"); }
+  private absDay(): number { const d = this.p.날짜; return (d.년 * 12 + d.월) * 28 + d.일; }
+  // 전설/환상은 포획·격파 시 이 세계에서 영구 소멸
+  private consumeIfSpecial(mon: Mon): void {
+    const sp = SPECIES.get(mon.종_id); if (!sp) return;
+    if ((sp.희귀도 === "전설" || sp.희귀도 === "환상") && !this.p.소멸_전설.includes(mon.종_id)) {
+      this.p.소멸_전설.push(mon.종_id);
+      UI.print(`🌑 ${sp.이름.한}은(는) 이제 이 세계에서 사라졌다. 다시는 나타나지 않는다.`, "warn");
+    }
+  }
 
   continueGame(): void {
     const p = load(); if (!p) { this.start(); return; }
@@ -271,15 +280,17 @@ export class Game {
     if (!this.p.party.some((m) => m.curHP > 0)) { UI.print("싸울 포켓몬이 없다! 센터에서 회복하자.", "warn"); this.whiteOut(); return; }
     const loc = this.loc();
     this.advanceHours(method === "잠복" ? 4 : 1);
-    const enc = rollEncounter(this.rng, loc, method, this.p.밤);
+    const enc = rollEncounter(this.rng, loc, method, this.p.밤, this.absDay(), this.p.소멸_전설);
     const shiny = this.rng.rand() < 1 / 512;
     const wild = buildMon(this.rng, enc.species.id, enc.level, { shiny });
     seen(this.p, enc.species.id);
     UI.clearLog();
     UI.print(`[${loc.이름} · ${method}${this.p.밤 ? " · 밤" : ""}]`, "dim");
-    UI.bigImage(shiny ? shinyArtwork(enc.species.id) : artwork(enc.species.id), `${shiny ? "✨이로치✨ " : ""}${enc.legend ? "✨전설✨ " : ""}야생 ${wild.별명} Lv${wild.level}  [${enc.species.타입.join("·")}, ${enc.species.희귀도}]`);
+    const rare = enc.mythical ? "✨환상✨ " : enc.legend ? "✨전설✨ " : "";
+    UI.bigImage(shiny ? shinyArtwork(enc.species.id) : artwork(enc.species.id), `${shiny ? "✨이로치✨ " : ""}${rare}야생 ${wild.별명} Lv${wild.level}  [${enc.species.타입.join("·")}, ${enc.species.희귀도}]`);
     if (shiny) UI.print("✨ 색이 다른 포켓몬(이로치)이다! 극히 드문 개체!", "crit");
-    if (enc.legend) UI.print("전설의 포켓몬이 모습을 드러냈다! 놓치지 마라!", "crit");
+    if (enc.mythical) UI.print("환상의 포켓몬이 나타났다! 세계에 단 하나뿐 — 잡거나 쓰러뜨리면 영영 사라진다!", "crit");
+    else if (enc.legend) UI.print("전설의 포켓몬이 모습을 드러냈다! 단 하나뿐인 존재다!", "crit");
     this.startBattle([wild], "wild", `야생 ${wild.별명}`, true, (b) => this.resolveWild(b, () => UI.setActions([
       { label: `계속 ${method}`, primary: true, on: () => this.explore(method) },
       { label: "다른 방식", on: () => this.exploreMenu() },
@@ -294,10 +305,12 @@ export class Game {
       else { this.p.box.push(c); UI.print(`${c.별명}은(는) 박스로 보내졌다.`, "good"); }
       this.addMoney(c.level * this.rng.int(15, 30), "포획 보고 보상");
       if (c.shiny) this.addMoney(5000, "✨이로치 포획 보너스");
+      this.consumeIfSpecial(c);
     } else if (b.state === "win") {
       UI.print("야생 포켓몬을 쓰러뜨렸다.", "good");
       this.addMoney(b.enemyTeam[0].level * this.rng.int(20, 45), "야생 처치 보상");
       if (b.enemyTeam[0].shiny) this.addMoney(2000, "✨이로치 처치 보너스");
+      this.consumeIfSpecial(b.enemyTeam[0]);
     } else if (b.state === "fled") UI.print("전투에서 벗어났다.", "dim");
     else if (b.state === "lose") { this.whiteOut(); return; }
     this.persist(); after();

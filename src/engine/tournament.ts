@@ -31,9 +31,8 @@ export function tierLevel(tier: string, rules: any, playerAvg: number): number {
 }
 
 function poolFor(rules: any): Species[] {
-  let pool = Array.from(SPECIES.values());
-  if (rules?.전설_금지 !== false) pool = pool.filter((s) => s.희귀도 !== "전설");
-  if (rules?.환상_금지 !== false) pool = pool.filter((s) => s.희귀도 !== "환상");
+  // 전설/환상은 세계에 1마리뿐이므로 생성 상대로는 절대 등장하지 않는다
+  let pool = Array.from(SPECIES.values()).filter((s) => s.희귀도 !== "전설" && s.희귀도 !== "환상");
   // 타입제한: "X 타입만" 처럼 'X'와 '만'이 함께면 그 타입으로 한정
   const tr: string | null = rules?.타입제한 ?? null;
   if (tr && tr.includes("만")) {
