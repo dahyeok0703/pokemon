@@ -59,6 +59,34 @@ export function genTrainerTeam(rng: RNG, level: number, rules: any, count: numbe
   return team;
 }
 
+// ── 접수 가능 시간(시간 개념) ──────────────────────────────
+function hashId(s: string): number { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; }
+export interface RegWindow { months: number[]; dayLo: number; dayHi: number; hourLo: number; hourHi: number; text: string; }
+export function regWindow(t: any): RegWindow {
+  const h = hashId(t.id ?? t.이름 ?? "");
+  switch (t.티어) {
+    case "로컬": return { months: [1,2,3,4,5,6,7,8,9,10,11,12], dayLo: -1, dayHi: -1, hourLo: 9, hourHi: 18, text: "매주 주말 09–18시" };
+    case "지방": return { months: [3,6,9,12], dayLo: 8, dayHi: 14, hourLo: 10, hourHi: 17, text: "분기(3·6·9·12월) 8–14일 10–17시" };
+    case "국가": { const m = [9,10,11][h % 3]; return { months: [m], dayLo: 12, dayHi: 18, hourLo: 10, hourHi: 16, text: `매년 ${m}월 12–18일 10–16시` }; }
+    case "대륙": { const m = [12,1,2][h % 3]; return { months: [m], dayLo: 5, dayHi: 11, hourLo: 10, hourHi: 16, text: `매년 ${m}월 5–11일 10–16시` }; }
+    case "세계": { const m = [7,8][h % 2]; return { months: [m], dayLo: 14, dayHi: 21, hourLo: 10, hourHi: 18, text: `매년 ${m}월 14–21일 10–18시` }; }
+    default: { const m = (h % 12) + 1; return { months: [m], dayLo: 10, dayHi: 20, hourLo: 9, hourHi: 18, text: `매년 ${m}월 10–20일 09–18시` }; }
+  }
+}
+export function isOpen(t: any, 월: number, 일: number, 시각: number): boolean {
+  const w = regWindow(t);
+  if (!w.months.includes(월)) return false;
+  if (시각 < w.hourLo || 시각 >= w.hourHi) return false;
+  if (w.dayLo < 0) return 일 % 7 === 6 || 일 % 7 === 0; // 로컬: 주말
+  return 일 >= w.dayLo && 일 <= w.dayHi;
+}
+
+// 대회 트로피 이름
+export function trophyName(t: any): string {
+  const medal: Record<string, string> = { 로컬: "🥉", 지방: "🥈", 국가: "🥇", 대륙: "🏆", 세계: "👑", 특수: "🎖️" };
+  return `${medal[t.티어] ?? "🏆"} ${t.이름} 우승 트로피`;
+}
+
 // 대회 라운드 구조 → 인터랙티브 라운드(상대 트레이너) 목록(최대 4)
 export interface RoundDef { 이름: string; teamSize: number; }
 export function buildRounds(t: any): RoundDef[] {

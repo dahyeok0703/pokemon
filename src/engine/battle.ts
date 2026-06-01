@@ -1,6 +1,6 @@
 import { RNG } from "./rng";
 import { MOVES, typeMult, speciesName } from "./data";
-import { Mon, expYield, gainExp } from "./pokemon";
+import { Mon, expYield, gainExp, ExpEvents, newExpEvents } from "./pokemon";
 import { catchAttempt, statusMod } from "./catch";
 
 export type LogLine = { text: string; cls?: string };
@@ -25,6 +25,7 @@ export class Battle {
   awaitingSwitch = false;
   caught: Mon | null = null;
   startCounter: number;
+  events: ExpEvents = newExpEvents();
 
   constructor(rng: RNG, playerTeam: Mon[], enemyTeam: Mon[], kind: "wild" | "trainer", enemyLabel = "") {
     this.rng = rng;
@@ -103,7 +104,7 @@ export class Battle {
   private onEnemyFaint(log: (t: string, c?: string) => void): void {
     const fainted = this.eActive();
     log(`💥 ${fainted.별명} 기절!`, "warn");
-    gainExp(this.pActive(), expYield(fainted), log);
+    gainExp(this.pActive(), expYield(fainted), log, this.events);
     const next = this.enemyTeam.findIndex((m) => m.curHP > 0);
     if (next < 0) { this.state = "win"; return; }
     this.eIndex = next;

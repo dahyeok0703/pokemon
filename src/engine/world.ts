@@ -148,7 +148,12 @@ export interface Encounter { species: Species; level: number; legend: boolean; }
 export function rollEncounter(rng: RNG, loc: Location, method: Method, night: boolean): Encounter {
   const [lo, hi] = loc.레벨;
   let level = rng.int(lo, hi);
-  if (method === "잠복" || method === "동굴" || method === "등산") level = Math.min(100, level + rng.int(0, 3));
+  // 현실성: 저렙~고렙이 마구잡이로 섞인다. 가끔 약골/거물이 튀어나온다.
+  const r = rng.rand();
+  if (r < 0.12) level = Math.max(2, lo - rng.int(2, 6));            // 약골
+  else if (r > 0.92) level = Math.min(100, hi + rng.int(8, 22));    // 거물
+  else if (r > 0.80) level = Math.min(100, hi + rng.int(2, 8));     // 강한 개체
+  if (method === "잠복" || method === "동굴" || method === "등산") level = Math.min(100, level + rng.int(0, 4));
 
   // 배회 전설 (잠복에서만, 매우 드묾)
   if (method === "잠복" && loc.전설?.length && rng.rand() < 1 / 90) {

@@ -114,9 +114,16 @@ export function expYield(loser: Mon): number {
   return Math.max(1, Math.floor((sp.기본경험치 * loser.level) / 5));
 }
 
-// 경험치 획득 → 레벨업/진화 처리. 로그 콜백.
-export function gainExp(mon: Mon, amount: number, log: (s: string, cls?: string) => void): void {
-  const sp = SPECIES.get(mon.종_id)!;
+// 전투 후 UI에서 처리할 이벤트(슬롯 꽉 찬 기술 학습 / 진화 축하)
+export interface ExpEvents {
+  learns: { mon: Mon; move: string }[];
+  evolves: { mon: Mon; fromName: string; toId: number; toName: string }[];
+}
+export function newExpEvents(): ExpEvents { return { learns: [], evolves: [] }; }
+
+// 경험치 획득 → 레벨업/진화 처리. 로그 콜백 + 이벤트 수집.
+export function gainExp(mon: Mon, amount: number, log: (s: string, cls?: string) => void, events?: ExpEvents): void {
+  let sp = SPECIES.get(mon.종_id)!;
   const group = expGroup(sp);
   mon.exp += amount;
   log(`${mon.별명} 경험치 +${amount}`, "dim");
@@ -124,7 +131,7 @@ export function gainExp(mon: Mon, amount: number, log: (s: string, cls?: string)
     mon.level += 1;
     recalc(mon);
     log(`✨ ${mon.별명}이(가) 레벨 ${mon.level} 달성!`, "good");
-    // 새 기술 학습(레벨업 기술 중 이번 레벨에 해당)
+    // 새 기술 학습(레벨업 기술 중 이번 레벨)
     for (const m of sp.기술풀) {
       if (m.방식 === "레벨업" && m.레벨 === mon.level && MOVES[m.기술]) {
         if (mon.moves.find((x) => x.name === m.기술)) continue;
@@ -132,8 +139,9 @@ export function gainExp(mon: Mon, amount: number, log: (s: string, cls?: string)
           const pp = MOVES[m.기술]?.PP ?? 20;
           mon.moves.push({ name: m.기술, pp, maxpp: pp });
           log(`   └ 새 기술 «${m.기술}» 습득!`, "sys");
+        } else if (events) {
+          events.learns.push({ mon, move: m.기술 }); // 슬롯 꽉 참 → UI에서 유저에게 물음
         } else {
-          // 가장 오래된 슬롯 교체(자동)
           const old = mon.moves.shift()!;
           const pp = MOVES[m.기술]?.PP ?? 20;
           mon.moves.push({ name: m.기술, pp, maxpp: pp });
@@ -150,9 +158,18 @@ export function gainExp(mon: Mon, amount: number, log: (s: string, cls?: string)
       if (mon.별명 === sp.이름.한) mon.별명 = childSp.이름.한;
       mon.name = childSp.이름.한;
       recalc(mon);
-      log(`🌟 ${fromName}이(가) ${childSp.이름.한}(으)로 진화했다!`, "good");
+      sp = childSp;
+      if (events) events.evolves.push({ mon, fromName, toId: child, toName: childSp.이름.한 });
+      else log(`🌟 ${fromName}이(가) ${childSp.이름.한}(으)로 진화했다!`, "good");
     }
   }
+}
+
+// 슬롯이 꽉 찬 상태에서 기술 교체(슬롯 인덱스) 또는 포기(-1)
+export function applyLearn(mon: Mon, move: string, slotIndex: number): void {
+  if (slotIndex < 0 || slotIndex > 3) return; // 포기
+  const pp = MOVES[move]?.PP ?? 20;
+  mon.moves[slotIndex] = { name: move, pp, maxpp: pp };
 }
 
 // 현재 종의 자식 중 레벨 조건을 만족하는 진화 대상
