@@ -134,7 +134,7 @@
 - [x] Phase 1: 스캐폴드 + lore.md + 전체 스키마 + CLAUDE.md + README.md
 - [x] Phase 2: 포켓몬 DB(전 1025종 + 190 대체폼 + 919 기술 + index) + regions.md 현실 지리 매핑
 - [x] Phase 3: 전투/포획/육성/메가/거다이맥스 규칙 확정 + 타입표/성격/경험치 데이터 + 시드 재현성 검증(verify_battle 통과)
-- [ ] Phase 4: 대회 템플릿 → 약 500개 생성 + 연간 달력
+- [x] Phase 4: 520개 대회 생성(로컬250/지방120/국가70/대륙40/세계10/특수30) + 성장경로 연결 + 2035 달력
 - [ ] Phase 5: NPC + 시작 시나리오 + 세이브 시스템 완성
 - [ ] Phase 6: 플레이테스트(밸런스·일관성)
 
@@ -154,7 +154,8 @@
 | `data/natures.json` | 25 성격 보정표. |
 | `data/exp_tables.json` | 경험치 그룹별 Lv1~100 누적 경험치. |
 | `data/regions.md` | 현실 지리 ↔ 포켓몬 출현 매핑. |
-| `data/tournaments/` | 약 500개 대회(티어별 분할) + `SCHEMA.md`. |
+| `data/tournaments/` | 520개 대회(`local/regional/national/continental/world/special.json`) + `index.json`(색인) + `SCHEMA.md`. |
+| `data/calendar_2035.json` | 2035 연간 대회 달력(개최일·주기, 정렬됨). |
 | `data/calendar.md` | 연간 대회 달력. |
 | `data/npcs/` | NPC 데이터 + `SCHEMA.md`. |
 | `mechanics/battle.md` | 전투 규칙·타입표·데미지/명중/급소/상태이상 공식. |

@@ -41,7 +41,12 @@ PokéAPI의 공개 CSV 데이터셋에서 전 종 포켓몬 DB를 생성한다.
 `python3 tools/verify_battle.py` — PRNG 재현, 능력치(리자몽 본가값 일치), 데미지 재현, 타입 상성, 포획 재현 전부 통과.
 GM은 이 파일과 동일한 공식으로 전투를 계산한다.
 
-## 예정
+## gen_tournaments.py  ✅ (Phase 4)
 
-- `gen_tournaments.py` (Phase 4) — 티어별 템플릿으로 약 500개 대회 생성.
-- `build_calendar.py` (Phase 4) — 개최 주기 규칙 → 연도 달력 전개.
+실제 도시 풀 + 티어별 템플릿 + 시드 난수로 **520개 대회 + 2035 달력**을 생성. `python3 tools/gen_tournaments.py`
+
+- `data/tournaments/{local,regional,national,continental,world,special}.json`
+  (로컬250/지방120/국가70/대륙40/세계10/특수30) + `index.json` 색인.
+- `data/calendar_2035.json` — 대회별 대표 개최일·주기, 월·일 정렬.
+- **성장 경로 자동 연결**: 상위 티어 `출전_자격.선행대회_입상` ↔ 하위 티어 `다음_단계` (검증됨).
+- 결정론(시드 20350601): 재실행해도 동일 산출.
